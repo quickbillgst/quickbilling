@@ -600,7 +600,7 @@ function generatePayslipHTML(payslip: any, tenant: any): string {
       </div>
     </div>
     
-    <!-- Bank Details -->
+    <!-- Bank Details - Hidden for now
     <table class="bank-table">
       <tr>
         <th>Bank Name</th>
@@ -611,6 +611,7 @@ function generatePayslipHTML(payslip: any, tenant: any): string {
         <td>${payslip.branchName || tenant?.bankDetails?.branchName || ''}</td>
       </tr>
     </table>
+    -->
     
     <!-- Footer -->
     <div class="footer">
