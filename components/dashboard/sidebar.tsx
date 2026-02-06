@@ -12,7 +12,8 @@ import {
   Settings,
   LogOut,
   Home,
-  Receipt
+  Receipt,
+  GraduationCap
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
@@ -21,6 +22,7 @@ const navItems = [
   { label: 'Dashboard', icon: Home, href: '/dashboard' },
   { label: 'Invoices', icon: FileText, href: '/dashboard/invoices' },
   { label: 'Payslips', icon: Receipt, href: '/dashboard/payslips' },
+  { label: 'Certificates', icon: GraduationCap, href: '/dashboard/certificates' },
   { label: 'Products', icon: Package, href: '/dashboard/products' },
   { label: 'Customers', icon: Users, href: '/dashboard/customers' },
   { label: 'Payments', icon: CreditCard, href: '/dashboard/payments' },
