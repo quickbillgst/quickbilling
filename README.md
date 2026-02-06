@@ -1,4 +1,4 @@
-# GST Billing & Invoice Management System
+# GST Billing & Invoice Management System.
 
 A production-ready SaaS application for creating GST-compliant invoices with automatic tax calculations, built with Next.js, TypeScript, and MongoDB. Perfect for Indian SMEs, startups, and accountants managing multi-state businesses.
 
