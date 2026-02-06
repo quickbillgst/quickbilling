@@ -26,7 +26,7 @@ export async function connectDB() {
   }
 }
 
-// Tenant Schema
+// Tenant Schema - Updated for Signatures & UPI
 const tenantSchema = new mongoose.Schema(
   {
     businessName: { type: String, required: true, index: true },
@@ -68,6 +68,14 @@ const tenantSchema = new mongoose.Schema(
       branchName: String,
     },
     logo: { type: String }, // Base64 encoded logo image
+    // Authorized signatory signatures (up to 2)
+    signatures: [{
+      name: String,
+      designation: String,
+      image: String, // Base64 encoded signature image
+    }],
+    // UPI payment details
+    upiId: { type: String },
   },
   { timestamps: true }
 );
@@ -249,6 +257,8 @@ const invoiceSchema = new mongoose.Schema(
     },
     notes: String,
     createdByUserId: mongoose.Schema.Types.ObjectId,
+    // Index of signature to use (0 or 1, from tenant.signatures array)
+    signatureIndex: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
@@ -419,11 +429,28 @@ const batchSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
 batchSchema.index({ tenantId: 1, productId: 1, batchNumber: 1 }, { unique: true });
 batchSchema.index({ tenantId: 1, expiryDate: 1 });
 
 // Export models - use mongoose.models to prevent re-compilation
+// Prevent model compilation errors in development
+// Delete models if they exist to force recompilation with new schema
+if (process.env.NODE_ENV === 'development') {
+  if (mongoose.models.Tenant) delete mongoose.models.Tenant;
+  if (mongoose.models.User) delete mongoose.models.User;
+  if (mongoose.models.Customer) delete mongoose.models.Customer;
+  if (mongoose.models.Product) delete mongoose.models.Product;
+  if (mongoose.models.Invoice) delete mongoose.models.Invoice;
+  if (mongoose.models.Payment) delete mongoose.models.Payment;
+  if (mongoose.models.StockLedger) delete mongoose.models.StockLedger;
+  if (mongoose.models.EInvoice) delete mongoose.models.EInvoice;
+  if (mongoose.models.AuditLog) delete mongoose.models.AuditLog;
+  if (mongoose.models.Batch) delete mongoose.models.Batch;
+  if (mongoose.models.Payslip) delete mongoose.models.Payslip;
+  if (mongoose.models.AuthSession) delete mongoose.models.AuthSession;
+  if (mongoose.models.PasswordReset) delete mongoose.models.PasswordReset;
+}
+
 export const Tenant =
   mongoose.models.Tenant || mongoose.model('Tenant', tenantSchema);
 export const User =

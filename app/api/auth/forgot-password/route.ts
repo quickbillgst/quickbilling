@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB, User, PasswordReset } from '@/lib/models';
 import crypto from 'crypto';
+import { sendPasswordResetEmail } from '@/lib/email';
 
 export async function POST(request: NextRequest) {
     try {
@@ -62,8 +63,8 @@ export async function POST(request: NextRequest) {
         console.log(`Expires: ${expiresAt.toLocaleString()}`);
         console.log('='.repeat(80) + '\n');
 
-        // TODO: Send email with reset link
-        // await sendPasswordResetEmail(user.email, resetUrl);
+        // Send email with reset link
+        await sendPasswordResetEmail(user.email, resetUrl);
 
         return NextResponse.json({
             success: true,

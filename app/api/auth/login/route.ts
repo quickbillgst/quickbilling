@@ -48,10 +48,21 @@ export async function POST(request: NextRequest) {
     // Fetch tenant info
     const tenant = await Tenant.findById(user.tenantId).lean();
 
+    // Verify tenant exists if linked
+    let tenantIdStr = '';
+    if (user.tenantId) {
+      tenantIdStr = user.tenantId.toString();
+    } else {
+      // Fallback or error if tenant is strictly required? 
+      // For now, let's log it and maybe allow login if your app supports tenant-less users 
+      // (though your schema says it is required).
+      console.warn(`[v0] User ${user._id} has no tenantId!`);
+    }
+
     const token = jwt.sign(
       {
         userId: user._id.toString(),
-        tenantId: user.tenantId.toString(),
+        tenantId: tenantIdStr,
         role: user.role,
         email: user.email
       },
@@ -98,13 +109,13 @@ export async function POST(request: NextRequest) {
             email: user.email,
             role: user.role,
             firstName: user.firstName,
-            tenantId: user.tenantId
+            tenantId: user.tenantId ? user.tenantId.toString() : undefined
           },
-          tenant: {
-            id: tenant?._id,
-            businessName: tenant?.businessName,
-            gstin: tenant?.gstin
-          }
+          tenant: tenant ? {
+            id: tenant._id,
+            businessName: tenant.businessName,
+            gstin: tenant.gstin
+          } : undefined
         }
       },
       { status: 200 }

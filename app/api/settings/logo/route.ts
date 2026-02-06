@@ -12,6 +12,14 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
+        // Validate tenantId exists and is not empty
+        if (!auth.tenantId || auth.tenantId.trim() === '') {
+            return NextResponse.json(
+                { error: 'No tenant associated with this account. Please contact support.' },
+                { status: 400 }
+            );
+        }
+
         await connectDB();
 
         const formData = await request.formData();
@@ -74,6 +82,14 @@ export async function DELETE(request: NextRequest) {
         const auth = await verifyAuth(request);
         if (!auth) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        // Validate tenantId exists and is not empty
+        if (!auth.tenantId || auth.tenantId.trim() === '') {
+            return NextResponse.json(
+                { error: 'No tenant associated with this account. Please contact support.' },
+                { status: 400 }
+            );
         }
 
         await connectDB();

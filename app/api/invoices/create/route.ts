@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
       isExport = false,
       isSez = false,
       notes,
+      signatureIndex = 0,
     } = body;
 
     // Validate required fields
@@ -153,6 +154,7 @@ export async function POST(request: NextRequest) {
       status: 'draft',
       notes,
       createdByUserId: auth.userId,
+      signatureIndex,
     });
 
     await invoice.save();

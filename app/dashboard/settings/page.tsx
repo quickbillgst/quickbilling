@@ -79,7 +79,8 @@ export default function SettingsPage() {
       bankName: '',
       accountName: '',
       accountNumber: '',
-      ifscCode: ''
+      ifscCode: '',
+      branchName: ''
     }
   });
 
@@ -124,6 +125,18 @@ export default function SettingsPage() {
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Signatures state (up to 2 signatures)
+  const [signatures, setSignatures] = useState<Array<{ name: string; designation: string; image: string }>>([]);
+  const [isUploadingSignature, setIsUploadingSignature] = useState(false);
+  const signatureInputRef1 = useRef<HTMLInputElement>(null);
+  const signatureInputRef2 = useRef<HTMLInputElement>(null);
+  const [signatureNames, setSignatureNames] = useState<[string, string]>(['', '']);
+  const [signatureDesignations, setSignatureDesignations] = useState<[string, string]>(['', '']);
+
+  // UPI state
+  const [upiId, setUpiId] = useState('');
+  const [isSavingUpi, setIsSavingUpi] = useState(false);
+
   // Fetch all settings
   const fetchSettings = async () => {
     try {
@@ -157,7 +170,8 @@ export default function SettingsPage() {
             bankName: data.bankDetails?.bankName || '',
             accountName: data.bankDetails?.accountName || '',
             accountNumber: data.bankDetails?.accountNumber || '',
-            ifscCode: data.bankDetails?.ifscCode || ''
+            ifscCode: data.bankDetails?.ifscCode || '',
+            branchName: data.bankDetails?.branchName || ''
           }
         });
 
@@ -194,6 +208,26 @@ export default function SettingsPage() {
       const sessionData = await sessionRes.json();
       if (sessionData.success) {
         setSessions(sessionData.data);
+      }
+
+      // 4. Fetch Signatures and UPI
+      const signaturesRes = await fetch('/api/settings/signatures', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const signaturesData = await signaturesRes.json();
+      if (signaturesData.success && signaturesData.data) {
+        setSignatures(signaturesData.data.signatures || []);
+        setUpiId(signaturesData.data.upiId || '');
+        // Set signature names and designations for editing
+        const sigs = signaturesData.data.signatures || [];
+        setSignatureNames([
+          sigs[0]?.name || '',
+          sigs[1]?.name || ''
+        ]);
+        setSignatureDesignations([
+          sigs[0]?.designation || '',
+          sigs[1]?.designation || ''
+        ]);
       }
 
     } catch (error) {
@@ -381,6 +415,101 @@ export default function SettingsPage() {
       toast.error(error.message || 'Failed to remove logo');
     } finally {
       setIsUploadingLogo(false);
+    }
+  };
+
+  // Handler for Signature Upload
+  const handleSignatureUpload = async (e: React.ChangeEvent<HTMLInputElement>, index: number) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const name = signatureNames[index];
+    const designation = signatureDesignations[index];
+
+    if (!name.trim()) {
+      toast.error('Please enter signatory name before uploading');
+      return;
+    }
+
+    setIsUploadingSignature(true);
+    try {
+      const formData = new FormData();
+      formData.append('signature', file);
+      formData.append('name', name);
+      formData.append('designation', designation);
+      formData.append('index', index.toString());
+
+      const res = await fetch('/api/settings/signatures', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to upload signature');
+
+      setSignatures(data.data.signatures);
+      toast.success('Signature uploaded successfully!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to upload signature');
+    } finally {
+      setIsUploadingSignature(false);
+    }
+  };
+
+  // Handler for Signature Delete
+  const handleSignatureDelete = async (index: number) => {
+    setIsUploadingSignature(true);
+    try {
+      const res = await fetch(`/api/settings/signatures?index=${index}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to remove signature');
+
+      setSignatures(data.data.signatures);
+      // Clear the name and designation for this slot
+      const newNames = [...signatureNames] as [string, string];
+      const newDesignations = [...signatureDesignations] as [string, string];
+      newNames[index] = '';
+      newDesignations[index] = '';
+      setSignatureNames(newNames);
+      setSignatureDesignations(newDesignations);
+      toast.success('Signature removed successfully!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to remove signature');
+    } finally {
+      setIsUploadingSignature(false);
+    }
+  };
+
+  // Handler for saving UPI ID
+  const handleSaveUpi = async () => {
+    setIsSavingUpi(true);
+    try {
+      const res = await fetch('/api/settings/signatures', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ upiId })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save UPI ID');
+
+      toast.success('UPI ID saved successfully!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to save UPI ID');
+    } finally {
+      setIsSavingUpi(false);
     }
   };
 
@@ -706,12 +835,222 @@ export default function SettingsPage() {
                     placeholder="HDFC0001234"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>Branch Name</Label>
+                  <Input
+                    value={businessData.bankDetails.branchName}
+                    onChange={(e) => setBusinessData({
+                      ...businessData,
+                      bankDetails: { ...businessData.bankDetails, branchName: e.target.value }
+                    })}
+                    placeholder="Main Branch"
+                  />
+                </div>
               </div>
               <div className="flex justify-end">
                 <Button onClick={handleSaveBusiness} disabled={isSaving}>
                   {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   Save Bank Details
                 </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Authorized Signatures Section */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Authorized Signatures</CardTitle>
+              <CardDescription>
+                Add up to 2 authorized signatories for invoices. These will appear on generated PDFs.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Signature 1 */}
+                <div className="border rounded-lg p-4 space-y-4">
+                  <h4 className="font-semibold text-slate-900">Signatory 1</h4>
+                  <div className="space-y-2">
+                    <Label>Name *</Label>
+                    <Input
+                      value={signatureNames[0]}
+                      onChange={(e) => setSignatureNames([e.target.value, signatureNames[1]])}
+                      placeholder="e.g., John Doe"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Designation</Label>
+                    <Input
+                      value={signatureDesignations[0]}
+                      onChange={(e) => setSignatureDesignations([e.target.value, signatureDesignations[1]])}
+                      placeholder="e.g., Managing Director"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Signature Image</Label>
+                    {signatures[0]?.image ? (
+                      <div className="relative">
+                        <img
+                          src={signatures[0].image}
+                          alt="Signature 1"
+                          className="h-20 object-contain border rounded bg-white p-2"
+                        />
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          className="absolute top-0 right-0"
+                          onClick={() => handleSignatureDelete(0)}
+                          disabled={isUploadingSignature}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ) : (
+                      <div>
+                        <input
+                          ref={signatureInputRef1}
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleSignatureUpload(e, 0)}
+                          className="hidden"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => signatureInputRef1.current?.click()}
+                          disabled={isUploadingSignature || !signatureNames[0].trim()}
+                        >
+                          {isUploadingSignature ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Upload className="mr-2 h-4 w-4" />
+                          )}
+                          Upload Signature
+                        </Button>
+                        {!signatureNames[0].trim() && (
+                          <p className="text-xs text-amber-600 mt-1">Enter name first</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Signature 2 */}
+                <div className="border rounded-lg p-4 space-y-4">
+                  <h4 className="font-semibold text-slate-900">Signatory 2</h4>
+                  <div className="space-y-2">
+                    <Label>Name *</Label>
+                    <Input
+                      value={signatureNames[1]}
+                      onChange={(e) => setSignatureNames([signatureNames[0], e.target.value])}
+                      placeholder="e.g., Jane Smith"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Designation</Label>
+                    <Input
+                      value={signatureDesignations[1]}
+                      onChange={(e) => setSignatureDesignations([signatureDesignations[0], e.target.value])}
+                      placeholder="e.g., Accountant"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Signature Image</Label>
+                    {signatures[1]?.image ? (
+                      <div className="relative">
+                        <img
+                          src={signatures[1].image}
+                          alt="Signature 2"
+                          className="h-20 object-contain border rounded bg-white p-2"
+                        />
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          className="absolute top-0 right-0 text-white"
+                          onClick={() => handleSignatureDelete(1)}
+                          disabled={isUploadingSignature}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ) : (
+                      <div>
+                        <input
+                          ref={signatureInputRef2}
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleSignatureUpload(e, 1)}
+                          className="hidden"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => signatureInputRef2.current?.click()}
+                          disabled={isUploadingSignature || !signatureNames[1].trim()}
+                        >
+                          {isUploadingSignature ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Upload className="mr-2 h-4 w-4" />
+                          )}
+                          Upload Signature
+                        </Button>
+                        {!signatureNames[1].trim() && (
+                          <p className="text-xs text-amber-600 mt-1">Enter name first</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* UPI Payment Section */}
+          <Card>
+            <CardHeader>
+              <CardTitle>UPI Payment Details</CardTitle>
+              <CardDescription>
+                Add your UPI ID to display a QR code on invoices for easy payments.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>UPI ID</Label>
+                    <Input
+                      value={upiId}
+                      onChange={(e) => setUpiId(e.target.value)}
+                      placeholder="yourname@upi"
+                    />
+                    <p className="text-xs text-slate-500">
+                      Example: business@okaxis, 9876543210@paytm
+                    </p>
+                  </div>
+                  <Button onClick={handleSaveUpi} disabled={isSavingUpi}>
+                    {isSavingUpi ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Save UPI ID
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  <Label>QR Code Preview</Label>
+                  {upiId ? (
+                    <div className="border rounded-lg p-4 bg-white inline-block">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(businessData.businessName || 'Business')}`}
+                        alt="UPI QR Code"
+                        className="w-36 h-36"
+                      />
+                      <p className="text-center text-sm text-slate-600 mt-2">{upiId}</p>
+                    </div>
+                  ) : (
+                    <div className="border rounded-lg p-8 bg-slate-50 text-center text-slate-500">
+                      <p>Enter UPI ID to see QR preview</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>

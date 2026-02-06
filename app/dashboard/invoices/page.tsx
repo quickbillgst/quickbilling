@@ -179,11 +179,19 @@ export default function InvoicesPage() {
                         {new Date(invoice.invoiceDate).toLocaleDateString()}
                       </TableCell>
                       <TableCell>
-                        <Link href={`/dashboard/invoices/${invoice._id}`}>
-                          <Button variant="ghost" size="sm">
-                            View
-                          </Button>
-                        </Link>
+                        <div className="flex gap-1">
+                          <Link href={`/dashboard/invoices/${invoice._id}`}>
+                            <Button variant="ghost" size="sm">
+                              View
+                            </Button>
+                          </Link>
+                          <Link href={`/api/invoices/${invoice._id}/pdf?token=${token}`} target="_blank">
+                            <Button variant="ghost" size="sm" className="gap-1">
+                              <Download className="w-4 h-4" />
+                              PDF
+                            </Button>
+                          </Link>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

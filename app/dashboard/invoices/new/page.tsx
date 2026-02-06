@@ -5,6 +5,7 @@ import React from "react"
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import useSWR from 'swr';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -106,10 +107,30 @@ export default function NewInvoicePage() {
     }
   }, [token]);
 
+  // Signatures state
+  const [signatures, setSignatures] = useState<Array<{ name: string; designation: string; image: string }>>([]);
+
+  React.useEffect(() => {
+    if (token) {
+      fetch('/api/settings/signatures', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          console.log('Fetched signatures:', data);
+          if (data.success && data.data) {
+            setSignatures(data.data.signatures || []);
+          }
+        })
+        .catch(err => console.error("Failed to fetch signatures", err));
+    }
+  }, [token]);
+
   const [formData, setFormData] = useState({
     customerId: '',
     invoiceDate: new Date().toISOString().split('T')[0],
     dueDate: '',
+    signatureIndex: 0,
   });
 
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
@@ -139,7 +160,7 @@ export default function NewInvoicePage() {
     // If Non-GST, force isIntrastate true effectively (or irrelevant) but taxRate is 0 anyway so tax is 0.
     // However, to be clean, let's keep logic standard as calculateLineItemTax handles 0 rate fine.
     const isIntrastate =
-      (tenant?.address?.state || 'MH') === (selectedCustomer?.addresses?.[0]?.state || 'MH');
+      (tenant?.address?.state || 'MH') === (selectedCustomer?.billingAddress?.state || 'MH');
 
     return calculateLineItemTax(
       {
@@ -152,7 +173,7 @@ export default function NewInvoicePage() {
         discountType: item.discountType,
       },
       {
-        state: selectedCustomer?.addresses?.[0]?.state || 'MH',
+        state: selectedCustomer?.billingAddress?.state || 'MH',
         isIntrastate,
         isIntegrated: isIntrastate,
       },
@@ -185,7 +206,7 @@ export default function NewInvoicePage() {
   );
 
   const isIntrastate =
-    (tenant?.address?.state || 'MH') === (selectedCustomer?.addresses?.[0]?.state || 'MH');
+    (tenant?.address?.state || 'MH') === (selectedCustomer?.billingAddress?.state || 'MH');
 
   const addLineItem = () => {
     const newItem: LineItem = {
@@ -257,7 +278,8 @@ export default function NewInvoicePage() {
           })),
           isExport: false,
           isSez: false,
-          isGstBill: isGstBill // Optional: Pass this if backend needs it, but taxRate 0 handling is usually enough
+          isGstBill: isGstBill, // Optional: Pass this if backend needs it, but taxRate 0 handling is usually enough
+          signatureIndex: formData.signatureIndex, // Selected signature for PDF
         }),
       });
 
@@ -355,6 +377,38 @@ export default function NewInvoicePage() {
                   onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
                 />
               </div>
+
+              {/* Signature Selection */}
+              <div className="space-y-2">
+                <Label>Authorized Signatory</Label>
+                {signatures.length > 0 ? (
+                  <>
+                    <Select
+                      value={formData.signatureIndex.toString()}
+                      onValueChange={(value) => setFormData({ ...formData, signatureIndex: parseInt(value) })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select signatory" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {signatures.map((sig, idx) => (
+                          <SelectItem key={idx} value={idx.toString()}>
+                            {sig.name}{sig.designation ? ` (${sig.designation})` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-slate-500">Signature will appear on the invoice PDF</p>
+                  </>
+                ) : (
+                  <div className="text-sm p-3 border rounded-md bg-slate-50 text-slate-600">
+                    No signatures configured.
+                    <Link href="/dashboard/settings" className="text-blue-600 hover:underline ml-1">
+                      Add signatures in Settings
+                    </Link>
+                  </div>
+                )}
+              </div>
             </div>
 
             {selectedCustomer && (
@@ -373,7 +427,7 @@ export default function NewInvoicePage() {
                   </div>
                   <div>
                     <p className="text-slate-600 font-semibold">State</p>
-                    <p className="text-slate-900">{selectedCustomer.addresses?.[0]?.state}</p>
+                    <p className="text-slate-900">{selectedCustomer.billingAddress?.state || 'N/A'}</p>
                   </div>
                 </div>
               </div>
@@ -466,6 +520,7 @@ export default function NewInvoicePage() {
                             }
                             className="w-24 text-right"
                             min="0"
+                            step="0.01"
                           />
                         </TableCell>
                         <TableCell>
@@ -619,7 +674,7 @@ export default function NewInvoicePage() {
                       {selectedCustomer?.gstin && (
                         <li>✓ GST registered customer</li>
                       )}
-                      <li>✓ Place of Supply: {selectedCustomer?.addresses?.[0]?.state}</li>
+                      <li>✓ Place of Supply: {selectedCustomer?.billingAddress?.state || 'N/A'}</li>
                     </ul>
                   </div>
                 </div>
