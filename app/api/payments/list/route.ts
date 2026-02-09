@@ -1,70 +1,68 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAuth } from '@/lib/auth-utils';
+import { connectDB, Payment, Invoice, Customer } from '@/lib/models';
 
 /**
  * GET /api/payments/list
- * Retrieve payment records with filtering and pagination
+ * Retrieve payment records with filtering and search
  */
 export async function GET(req: NextRequest) {
   try {
     const auth = await verifyAuth(req);
-    if (!auth.valid) {
+    if (!auth) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    await connectDB();
+
     const url = new URL(req.url);
     const status = url.searchParams.get('status');
-    const invoiceId = url.searchParams.get('invoiceId');
+    const search = url.searchParams.get('search');
     const page = parseInt(url.searchParams.get('page') || '1');
-    const limit = parseInt(url.searchParams.get('limit') || '20');
+    const limit = parseInt(url.searchParams.get('limit') || '50');
+    const skip = (page - 1) * limit;
 
-    // Mock data for demo
-    const mockPayments = [
-      {
-        id: 'pay_001',
-        invoiceId: 'inv_001',
-        amount: 45000,
-        status: 'completed',
-        method: 'bank_transfer',
-        date: '2024-02-03',
-        reference: 'NEFT-001',
-      },
-      {
-        id: 'pay_002',
-        invoiceId: 'inv_002',
-        amount: 62000,
-        status: 'pending',
-        method: 'upi',
-        date: '2024-02-02',
-        reference: 'UPI-001',
-      },
-      {
-        id: 'pay_003',
-        invoiceId: 'inv_003',
-        amount: 28000,
-        status: 'completed',
-        method: 'cash',
-        date: '2024-02-01',
-        reference: 'CASH-001',
-      },
-    ];
+    let query: any = { tenantId: auth.tenantId };
 
-    let filtered = mockPayments;
-
-    if (status) {
-      filtered = filtered.filter((p) => p.status === status);
+    if (status && status !== 'all') {
+      query.status = status;
     }
 
-    if (invoiceId) {
-      filtered = filtered.filter((p) => p.invoiceId === invoiceId);
+    // Fetch payments with population
+    // Note: Search is complex with population, we might need aggregation if search is across joined fields
+    // For now, let's fetch and filter if search is present, or simple fetch if not
+
+    let payments = await Payment.find(query)
+      .populate({
+        path: 'invoiceId',
+        select: 'invoiceNumber customerId totalAmount',
+        populate: {
+          path: 'customerId',
+          select: 'name'
+        }
+      })
+      .sort({ paymentDate: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    // Filter by search if provided (searching invoice number or customer name)
+    if (search) {
+      const searchLower = search.toLowerCase();
+      payments = payments.filter((p: any) => {
+        const invNum = p.invoiceId?.invoiceNumber?.toLowerCase() || '';
+        const custName = p.invoiceId?.customerId?.name?.toLowerCase() || '';
+        const refId = p.paymentReferenceId?.toLowerCase() || '';
+        return invNum.includes(searchLower) || custName.includes(searchLower) || refId.includes(searchLower);
+      });
     }
 
-    const total = filtered.length;
-    const payments = filtered.slice((page - 1) * limit, page * limit);
+    const total = await Payment.countDocuments(query);
 
     return NextResponse.json(
       {
-        payments,
+        success: true,
+        data: payments,
         pagination: {
           page,
           limit,
@@ -75,6 +73,7 @@ export async function GET(req: NextRequest) {
       { status: 200 }
     );
   } catch (error: any) {
+    console.error('[Payments List API Error]', error);
     return NextResponse.json(
       { error: error.message || 'Failed to fetch payments' },
       { status: 500 }

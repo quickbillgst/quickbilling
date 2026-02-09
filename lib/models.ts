@@ -60,6 +60,14 @@ const tenantSchema = new mongoose.Schema(
       enum: ['trial', 'active', 'suspended'],
       default: 'trial',
     },
+    gstInvoiceSeries: [{
+      prefix: { type: String, required: true },
+      nextNumber: { type: Number, required: true, default: 1 }
+    }],
+    nonGstInvoiceSeries: [{
+      prefix: { type: String, required: true },
+      nextNumber: { type: Number, required: true, default: 1 }
+    }],
     bankDetails: {
       accountName: String,
       accountNumber: String,
@@ -67,6 +75,14 @@ const tenantSchema = new mongoose.Schema(
       ifscCode: String,
       branchName: String,
     },
+    bankAccounts: [{
+      accountName: String,
+      accountNumber: String,
+      bankName: String,
+      ifscCode: String,
+      branchName: String,
+      isDefault: { type: Boolean, default: false }
+    }],
     logo: { type: String }, // Base64 encoded logo image
     // Authorized signatory signatures (up to 2)
     signatures: [{
@@ -232,6 +248,8 @@ const invoiceSchema = new mongoose.Schema(
         quantity: Number,
         unitPrice: Number,
         discount: { type: Number, default: 0 },
+        discountValue: { type: Number, default: 0 },
+        discountType: { type: String, enum: ['percentage', 'fixed'], default: 'fixed' },
         taxRate: Number,
         lineAmount: Number,
         lineTax: Number,
@@ -245,7 +263,9 @@ const invoiceSchema = new mongoose.Schema(
     igstAmount: Number,
     totalTaxAmount: Number,
     totalAmount: { type: Number, required: true },
+    paidAmount: { type: Number, default: 0 },
     roundOff: Number,
+    enableRoundOff: { type: Boolean, default: true },
     isReverseCharge: { type: Boolean, default: false },
     isExport: { type: Boolean, default: false },
     placeOfSupply: String,
@@ -256,6 +276,8 @@ const invoiceSchema = new mongoose.Schema(
       index: true,
     },
     notes: String,
+    terms: String,
+    bankAccountId: String,
     createdByUserId: mongoose.Schema.Types.ObjectId,
     // Index of signature to use (0 or 1, from tenant.signatures array)
     signatureIndex: { type: Number, default: 0 },
@@ -285,20 +307,21 @@ const paymentSchema = new mongoose.Schema(
     paymentReferenceId: { type: String, index: true },
     paymentMethod: {
       type: String,
-      enum: ['cash', 'cheque', 'bank_transfer', 'card', 'upi', 'wallet'],
+      enum: ['cash', 'cheque', 'bank_transfer', 'card', 'upi', 'wallet', 'net_banking', 'emi', 'tds'],
       default: 'cash',
     },
     paymentAmount: { type: Number, required: true },
     status: {
       type: String,
       enum: ['pending', 'completed', 'failed', 'refunded'],
-      default: 'pending',
+      default: 'completed',
       index: true,
     },
     gatewayName: String,
     paymentDate: Date,
     isReconciled: { type: Boolean, default: false },
     bankReference: String,
+    bankName: String,
     notes: String,
     createdByUserId: mongoose.Schema.Types.ObjectId,
   },
@@ -458,6 +481,30 @@ const certificateSchema = new mongoose.Schema(
 
 certificateSchema.index({ tenantId: 1, generatedAt: -1 });
 
+// General Ledger Schema
+const ledgerEntrySchema = new mongoose.Schema(
+  {
+    tenantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Tenant',
+      required: true,
+      index: true,
+    },
+    entryType: { type: String, enum: ['debit', 'credit'], required: true },
+    accountCode: { type: String, required: true, index: true },
+    accountName: { type: String, required: true },
+    amount: { type: Number, required: true },
+    referenceType: { type: String, required: true }, // e.g., 'invoice', 'payment', 'purchase'
+    referenceId: { type: String, required: true, index: true },
+    description: String,
+    createdByUserId: mongoose.Schema.Types.ObjectId,
+  },
+  { timestamps: { createdAt: true, updatedAt: false } }
+);
+
+ledgerEntrySchema.index({ tenantId: 1, accountCode: 1, createdAt: -1 });
+ledgerEntrySchema.index({ tenantId: 1, referenceId: 1 });
+
 
 // Export models - use mongoose.models to prevent re-compilation
 // Prevent model compilation errors in development
@@ -477,6 +524,7 @@ if (process.env.NODE_ENV === 'development') {
   if (mongoose.models.Certificate) delete mongoose.models.Certificate;
   if (mongoose.models.AuthSession) delete mongoose.models.AuthSession;
   if (mongoose.models.PasswordReset) delete mongoose.models.PasswordReset;
+  if (mongoose.models.LedgerEntry) delete mongoose.models.LedgerEntry;
 }
 
 export const Tenant =
@@ -502,6 +550,8 @@ export const Batch =
   mongoose.models.Batch || mongoose.model('Batch', batchSchema);
 export const Certificate =
   mongoose.models.Certificate || mongoose.model('Certificate', certificateSchema);
+export const LedgerEntry =
+  mongoose.models.LedgerEntry || mongoose.model('LedgerEntry', ledgerEntrySchema);
 
 
 

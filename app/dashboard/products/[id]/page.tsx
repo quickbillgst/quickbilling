@@ -51,7 +51,8 @@ const productSchema = z.object({
     reorderPoint: z.coerce.number().optional().default(10),
     barcodeValue: z.string().optional(),
     barcodeType: z.enum(['ean13', 'code128', 'qr']).default('ean13'),
-    isService: z.boolean().default(false)
+    isService: z.boolean().default(false),
+    isActive: z.boolean().default(true)
 });
 
 type ProductFormData = z.infer<typeof productSchema>;
@@ -89,7 +90,8 @@ export default function EditProductPage() {
             reorderPoint: 10,
             barcodeValue: '',
             barcodeType: 'ean13',
-            isService: false
+            isService: false,
+            isActive: true
         },
     });
 
@@ -112,6 +114,9 @@ export default function EditProductPage() {
                 const { data } = await res.json();
 
                 // Map backend data to form structure
+                // Calculate inclusive selling price
+                const inclusivePrice = data.sellingPrice * (1 + (data.gstRate / 100));
+
                 reset({
                     sku: data.sku,
                     name: data.name,
@@ -121,12 +126,13 @@ export default function EditProductPage() {
                     taxRate: data.gstRate, // Note mapping: gstRate -> taxRate
                     gstType: data.gstType || 'cgst_sgst',
                     costPrice: data.costPrice || 0,
-                    sellingPrice: data.sellingPrice,
+                    sellingPrice: parseFloat(inclusivePrice.toFixed(2)),
                     trackInventory: data.trackInventory !== false,
                     reorderPoint: data.reorderPoint || 10,
                     barcodeValue: data.barcodeValue || '',
                     barcodeType: data.barcodeType || 'ean13',
-                    isService: data.isService || false
+                    isService: data.isService || false,
+                    isActive: data.isActive !== false
                 });
             } catch (error) {
                 toast.error('Could not fetch product details');
@@ -159,28 +165,43 @@ export default function EditProductPage() {
         }
     };
 
-    // Calculate margin whenever price changes
+    // Calculate margin and unit price whenever prices change
+    const [unitPrice, setUnitPrice] = useState<number>(0);
+    const taxRate = watch('taxRate');
+
     useEffect(() => {
         if (sellingPrice && sellingPrice > 0) {
+            // Calculate unit price (excluding GST) from selling price (including GST)
+            const basePrice = sellingPrice / (1 + (taxRate / 100));
+            setUnitPrice(parseFloat(basePrice.toFixed(2)));
+
             const cp = costPrice || 0;
-            const calculatedMargin = ((sellingPrice - cp) / sellingPrice) * 100;
+            // Margin calculation based on base price vs cost price
+            const calculatedMargin = basePrice > 0 ? ((basePrice - cp) / basePrice) * 100 : 0;
             setMargin(parseFloat(calculatedMargin.toFixed(2)));
         } else {
+            setUnitPrice(0);
             setMargin(null);
         }
-    }, [costPrice, sellingPrice]);
+    }, [costPrice, sellingPrice, taxRate]);
 
     const onSubmit = async (data: ProductFormData) => {
         setIsLoading(true);
 
         try {
+            // Convert inclusive selling price back to exclusive base price for storage
+            const basePrice = data.sellingPrice / (1 + (data.taxRate / 100));
+
             const res = await fetch(`/api/products/${params.id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${token}`
                 },
-                body: JSON.stringify(data)
+                body: JSON.stringify({
+                    ...data,
+                    sellingPrice: parseFloat(basePrice.toFixed(2)) // Store price EXCLUDING GST
+                })
             });
 
             const result = await res.json();
@@ -338,7 +359,7 @@ export default function EditProductPage() {
                             <CardContent className="space-y-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-2">
-                                        <Label htmlFor="sellingPrice">Selling Price (₹) <span className="text-destructive">*</span></Label>
+                                        <Label htmlFor="sellingPrice">Selling Price (Incl. GST) (₹) <span className="text-destructive">*</span></Label>
                                         <div className="relative">
                                             <span className="absolute left-3 top-2.5 text-muted-foreground">₹</span>
                                             <Input
@@ -352,6 +373,11 @@ export default function EditProductPage() {
                                             />
                                         </div>
                                         {errors.sellingPrice && <p className="text-xs text-destructive">{errors.sellingPrice.message}</p>}
+                                        {sellingPrice > 0 && (
+                                            <p className="text-xs text-primary font-medium">
+                                                Unit Price (Excl. GST): ₹{unitPrice}
+                                            </p>
+                                        )}
                                     </div>
 
                                     <div className="space-y-2">
@@ -427,6 +453,33 @@ export default function EditProductPage() {
 
                     {/* Right Column: Sidebar Info */}
                     <div className="space-y-6 lg:sticky lg:top-8 h-fit">
+                        {/* Product Status */}
+                        <Card>
+                            <CardHeader className="pb-3">
+                                <CardTitle className="text-base flex items-center gap-2">
+                                    <RefreshCw className="h-4 w-4" />
+                                    Product Status
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="flex items-center justify-between p-3 rounded-lg border bg-slate-50/50">
+                                    <div className="space-y-0.5">
+                                        <Label className="text-sm font-bold">Active Status</Label>
+                                        <p className="text-[10px] text-muted-foreground whitespace-pre-wrap">
+                                            {watch('isActive')
+                                                ? "Product is visible in invoices and sales"
+                                                : "Product is hidden from list but kept in records"}
+                                        </p>
+                                    </div>
+                                    <Switch
+                                        checked={watch('isActive')}
+                                        onCheckedChange={(checked) => setValue('isActive', checked)}
+                                        disabled={isLoading}
+                                    />
+                                </div>
+                            </CardContent>
+                        </Card>
+
                         {/* Tax Details */}
                         <Card>
                             <CardHeader>

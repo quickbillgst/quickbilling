@@ -19,14 +19,14 @@ export async function GET(
     const invoice = await Invoice.findOne({
       _id: id,
       tenantId: auth.tenantId,
-    }).lean();
+    }).populate('customerId').lean() as any;
 
     if (!invoice) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
-    // Fetch customer details
-    const customer = await Customer.findById(invoice.customerId).lean();
+    // Fetch customer details from populated invoice
+    const customer = invoice.customerId;
 
     // Fetch company information from tenant settings
     const tenant = await Tenant.findById(auth.tenantId).lean();
@@ -86,6 +86,23 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
 
   // Determine if IGST or CGST+SGST
   const isIGST = invoice.igstAmount > 0;
+
+  // Resolve Bank Details
+  let bankDetails = null;
+  if (invoice.bankAccountId && tenant?.bankAccounts?.length) {
+    bankDetails = tenant.bankAccounts.find((b: any) =>
+      (b._id && b._id.toString() === invoice.bankAccountId) ||
+      b.accountNumber === invoice.bankAccountId
+    );
+  }
+
+  if (!bankDetails && tenant?.bankAccounts?.length) {
+    bankDetails = tenant.bankAccounts.find((b: any) => b.isDefault) || tenant.bankAccounts[0];
+  }
+
+  if (!bankDetails && tenant?.bankDetails?.accountNumber) {
+    bankDetails = tenant.bankDetails;
+  }
 
   // Calculate totals
   const taxableAmount = invoice.taxableAmount || invoice.subtotalAmount || 0;
@@ -583,6 +600,12 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
             <span class="value">₹${formatCurrency(invoice.sgstAmount || 0)}</span>
           </div>
         `}
+        ${invoice.roundOff ? `
+          <div class="total-line">
+            <span class="label">Round Off</span>
+            <span class="value">${invoice.roundOff > 0 ? '+' : ''}${formatCurrency(invoice.roundOff)}</span>
+          </div>
+        ` : ''}
         <div class="total-line grand">
           <span class="label">Total</span>
           <span class="value">₹${formatCurrency(grandTotal)}</span>
@@ -600,6 +623,23 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     <div class="amount-payable-row">
       <span>Amount Payable:</span>
       <span>₹${formatCurrency(grandTotal)}</span>
+    </div>
+
+    <!-- Notes & Terms -->
+    <div style="margin-top: 20px; font-size: 11px;">
+        ${invoice.notes ? `
+            <div style="margin-bottom: 10px;">
+                <div style="font-weight: bold; color: #1f2937; margin-bottom: 3px;">Notes:</div>
+                <div style="color: #4b5563; white-space: pre-wrap;">${invoice.notes}</div>
+            </div>
+        ` : ''}
+        
+        ${invoice.terms ? `
+            <div style="margin-bottom: 10px;">
+                <div style="font-weight: bold; color: #1f2937; margin-bottom: 3px;">Terms & Conditions:</div>
+                <div style="color: #4b5563; white-space: pre-wrap;">${invoice.terms}</div>
+            </div>
+        ` : ''}
     </div>
     
     <!-- Footer Section -->
@@ -622,11 +662,13 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
       <div class="footer-col">
         <div class="footer-title">Bank Details:</div>
         <div class="bank-table">
-          <span class="bank-label">Bank:</span><span class="bank-value">${tenant?.bankDetails?.bankName || 'N/A'}</span><br>
-          <span class="bank-label">Account Holder:</span><span class="bank-value">${tenant?.bankDetails?.accountName || tenant?.businessName || 'N/A'}</span><br>
-          <span class="bank-label">Account #:</span><span class="bank-value">${tenant?.bankDetails?.accountNumber || 'N/A'}</span><br>
-          <span class="bank-label">IFSC Code:</span><span class="bank-value">${tenant?.bankDetails?.ifscCode || 'N/A'}</span><br>
-          ${tenant?.bankDetails?.branchName ? `<span class="bank-label">Branch:</span><span class="bank-value">${tenant.bankDetails.branchName}</span>` : ''}
+          ${bankDetails ? `
+              <span class="bank-label">Bank:</span><span class="bank-value">${bankDetails.bankName || 'N/A'}</span><br>
+              <span class="bank-label">Account Holder:</span><span class="bank-value">${bankDetails.accountName || tenant?.businessName || 'N/A'}</span><br>
+              <span class="bank-label">Account #:</span><span class="bank-value">${bankDetails.accountNumber || 'N/A'}</span><br>
+              <span class="bank-label">IFSC Code:</span><span class="bank-value">${bankDetails.ifscCode || 'N/A'}</span><br>
+              ${bankDetails.branchName ? `<span class="bank-label">Branch:</span><span class="bank-value">${bankDetails.branchName}</span>` : ''}
+          ` : 'No bank details available'}
         </div>
       </div>
       

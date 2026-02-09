@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB, Invoice, Customer, Tenant } from '@/lib/models';
-import { calculateInvoiceTax } from '@/lib/services/gst-service';
+import { calculateInvoiceTax, calculateLineItemTax } from '@/lib/services/gst-service';
 import { verifyAuth } from '@/lib/auth-utils';
 
 export async function POST(request: NextRequest) {
@@ -25,6 +25,9 @@ export async function POST(request: NextRequest) {
       isExport = false,
       isSez = false,
       notes,
+      terms,
+      bankAccountId,
+      enableRoundOff,
       signatureIndex = 0,
     } = body;
 
@@ -83,55 +86,93 @@ export async function POST(request: NextRequest) {
 
     // Generate invoice number from tenant settings
     const isGstBill = body.isGstBill !== false; // Default to true if not specified
-    const prefix = isGstBill
-      ? (tenant.invoicePrefix || 'INV-')
-      : (tenant.nonGstInvoicePrefix || 'BILL-');
+    const requestedPrefix = body.prefix;
 
-    let nextNum = isGstBill
-      ? (tenant.nextInvoiceNumber || 1)
-      : (tenant.nextNonGstInvoiceNumber || 1);
+    let prefix = requestedPrefix;
+    let nextNum = 1;
 
-    let invoiceNumber = '';
+    // Helper to find and increment in series
+    let seriesUpdated = false;
 
-    while (true) {
-      invoiceNumber = `${prefix}${String(nextNum).padStart(5, '0')}`;
-      const existing = await Invoice.findOne({
-        tenantId: auth.tenantId,
-        invoiceNumber
-      });
-
-      if (!existing) {
-        break;
-      }
-      nextNum++;
-    }
-
-    // Increment next invoice number for next time
     if (isGstBill) {
-      tenant.nextInvoiceNumber = nextNum + 1;
+      if (tenant.gstInvoiceSeries && tenant.gstInvoiceSeries.length > 0 && requestedPrefix) {
+        const idx = tenant.gstInvoiceSeries.findIndex((s: any) => s.prefix === requestedPrefix);
+        if (idx >= 0) {
+          prefix = tenant.gstInvoiceSeries[idx].prefix;
+          nextNum = tenant.gstInvoiceSeries[idx].nextNumber;
+          tenant.gstInvoiceSeries[idx].nextNumber += 1;
+          seriesUpdated = true;
+        }
+      }
+
+      if (!seriesUpdated) {
+        // Fallback or legacy default
+        prefix = tenant.invoicePrefix || 'INV-';
+        nextNum = tenant.nextInvoiceNumber || 1;
+        tenant.nextInvoiceNumber += 1;
+      }
     } else {
-      tenant.nextNonGstInvoiceNumber = nextNum + 1;
+      // Non-GST
+      if (tenant.nonGstInvoiceSeries && tenant.nonGstInvoiceSeries.length > 0 && requestedPrefix) {
+        const idx = tenant.nonGstInvoiceSeries.findIndex((s: any) => s.prefix === requestedPrefix);
+        if (idx >= 0) {
+          prefix = tenant.nonGstInvoiceSeries[idx].prefix;
+          nextNum = tenant.nonGstInvoiceSeries[idx].nextNumber;
+          tenant.nonGstInvoiceSeries[idx].nextNumber += 1;
+          seriesUpdated = true;
+        }
+      }
+
+      if (!seriesUpdated) {
+        prefix = tenant.nonGstInvoicePrefix || 'BILL-';
+        nextNum = tenant.nextNonGstInvoiceNumber || 1;
+        tenant.nextNonGstInvoiceNumber += 1;
+      }
     }
+
+    const invoiceNumber = `${prefix}${nextNum}`;
+
     await tenant.save();
 
     // Process line items with tax calculations
     const processedLineItems = lineItems.map((item: any) => {
-      const amount = item.quantity * item.unitPrice;
-      const discount = item.discountValue || 0;
-      const taxableAmount = amount - discount;
-      const taxAmount = (taxableAmount * (item.taxRate || 18)) / 100;
+      const calc = calculateLineItemTax(
+        {
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          hsn: item.hsn,
+          taxRate: item.taxRate ?? 18,
+          discountValue: item.discountValue,
+          discountType: item.discountType,
+        },
+        taxContext,
+        false,
+        isExport
+      );
 
       return {
         description: item.description,
         hsnCode: item.hsn,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        discount: discount,
+        discount: calc.discountAmount,
+        discountValue: item.discountValue,
+        discountType: item.discountType,
         taxRate: item.taxRate ?? 18,
-        lineAmount: amount,
-        lineTax: taxAmount,
+        lineAmount: calc.lineAmount,
+        lineTax: calc.taxAmount,
       };
     });
+
+    // Calculate final total with round off
+    let finalTotalAmount = taxSummary.totalAmount;
+    let roundOffAmount = 0;
+
+    if (enableRoundOff) {
+      const rounded = Math.round(finalTotalAmount);
+      roundOffAmount = rounded - finalTotalAmount;
+      finalTotalAmount = rounded;
+    }
 
     // Create invoice
     const invoice = new Invoice({
@@ -148,11 +189,15 @@ export async function POST(request: NextRequest) {
       sgstAmount: taxSummary.sgstAmount,
       igstAmount: taxSummary.igstAmount,
       totalTaxAmount: taxSummary.taxAmount,
-      totalAmount: taxSummary.totalAmount,
+      totalAmount: finalTotalAmount,
+      roundOff: roundOffAmount,
+      enableRoundOff,
       isExport,
       placeOfSupply: buyerState,
       status: 'draft',
       notes,
+      terms,
+      bankAccountId,
       createdByUserId: auth.userId,
       signatureIndex,
     });

@@ -67,6 +67,8 @@ export async function PUT(request: NextRequest) {
         if (body.nextInvoiceNumber !== undefined) tenant.nextInvoiceNumber = parseInt(body.nextInvoiceNumber);
         if (body.nonGstInvoicePrefix !== undefined) tenant.nonGstInvoicePrefix = body.nonGstInvoicePrefix;
         if (body.nextNonGstInvoiceNumber !== undefined) tenant.nextNonGstInvoiceNumber = parseInt(body.nextNonGstInvoiceNumber);
+        if (body.gstInvoiceSeries) tenant.gstInvoiceSeries = body.gstInvoiceSeries;
+        if (body.nonGstInvoiceSeries) tenant.nonGstInvoiceSeries = body.nonGstInvoiceSeries;
 
         // Address update logic
         if (body.address) {
@@ -76,6 +78,10 @@ export async function PUT(request: NextRequest) {
         // Bank Details update logic
         if (body.bankDetails) {
             tenant.bankDetails = { ...tenant.bankDetails, ...body.bankDetails };
+        }
+
+        if (body.bankAccounts) {
+            tenant.bankAccounts = body.bankAccounts;
         }
 
         await tenant.save();

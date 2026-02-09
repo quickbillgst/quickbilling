@@ -83,9 +83,9 @@ export async function POST(request: NextRequest) {
       discountAmount
     );
 
-    // Generate invoice number
-    const invoiceCount = await Invoice.countDocuments({ tenantId: auth.tenantId });
-    const invoiceNumber = `INV-${new Date().getFullYear()}-${String(invoiceCount + 1).padStart(5, '0')}`;
+    // Generate invoice number from Tenant sequence
+    const currentSeq = tenant.nextInvoiceNumber;
+    const invoiceNumber = `INV-${new Date().getFullYear()}-${currentSeq}`;
 
     // Create invoice
     const invoice = new Invoice({
@@ -111,6 +111,9 @@ export async function POST(request: NextRequest) {
     });
 
     await invoice.save();
+
+    // Increment invoice sequence
+    await Tenant.findByIdAndUpdate(auth.tenantId, { $inc: { nextInvoiceNumber: 1 } });
 
     // Log to audit trail
     await AuditLog.create({

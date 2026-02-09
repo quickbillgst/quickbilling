@@ -101,6 +101,7 @@ export async function PUT(
         product.barcodeValue = body.barcodeValue || '';
         product.barcodeType = body.barcodeType || product.barcodeType;
         product.isService = body.isService !== undefined ? body.isService : product.isService;
+        product.isActive = body.isActive !== undefined ? body.isActive : product.isActive;
 
         await product.save();
 

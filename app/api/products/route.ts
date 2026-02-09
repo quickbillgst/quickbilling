@@ -16,8 +16,9 @@ function verifyAuth(request: NextRequest): { userId: string; tenantId: string } 
 
   try {
     const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; tenantId: string };
-    return decoded;
+    if (!JWT_SECRET) return null;
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    return decoded as { userId: string; tenantId: string };
   } catch {
     return null;
   }
@@ -106,7 +107,7 @@ export async function GET(request: NextRequest) {
     const offset = parseInt(searchParams.get('offset') || '0');
     const search = searchParams.get('search');
 
-    const query: any = { tenantId: auth.tenantId, isActive: true };
+    const query: any = { tenantId: auth.tenantId };
 
     if (search) {
       query.$or = [

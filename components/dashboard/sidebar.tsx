@@ -13,7 +13,8 @@ import {
   LogOut,
   Home,
   Receipt,
-  GraduationCap
+  GraduationCap,
+  Upload
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,7 @@ const navItems = [
   { label: 'Products', icon: Package, href: '/dashboard/products' },
   { label: 'Customers', icon: Users, href: '/dashboard/customers' },
   { label: 'Payments', icon: CreditCard, href: '/dashboard/payments' },
+  { label: 'Bulk Upload', icon: Upload, href: '/dashboard/invoices/bulk-upload' },
   { label: 'Reports', icon: BarChart3, href: '/dashboard/reports' },
   { label: 'Settings', icon: Settings, href: '/dashboard/settings' }
 ];

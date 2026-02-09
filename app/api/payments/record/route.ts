@@ -13,17 +13,17 @@ if (!JWT_SECRET) {
 export async function POST(request: NextRequest) {
   try {
     await connectDB();
-    
+
     // Verify JWT
     const token = request.headers.get('authorization')?.split(' ')[1];
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    
+
     const decoded = verify(token, JWT_SECRET) as { tenantId: string; userId: string };
     const tenantId = decoded.tenantId;
     const userId = decoded.userId;
-    
+
     const body = await request.json();
     const {
       invoiceId,
@@ -31,15 +31,17 @@ export async function POST(request: NextRequest) {
       paymentMethod,
       paymentDate,
       bankReference,
+      paymentReferenceId,
+      bankName,
       notes,
     } = body;
-    
+
     // Verify invoice exists and belongs to tenant
     const invoice = await Invoice.findOne({ _id: invoiceId, tenantId });
     if (!invoice) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
-    
+
     // Check if payment exceeds invoice amount
     const totalPaid = await Payment.aggregate([
       {
@@ -55,7 +57,7 @@ export async function POST(request: NextRequest) {
         },
       },
     ]);
-    
+
     const alreadyPaid = totalPaid[0]?.totalAmount || 0;
     if (alreadyPaid + paymentAmount > invoice.totalAmount) {
       return NextResponse.json(
@@ -63,7 +65,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    
+
     // Create payment record
     const payment = new Payment({
       _id: new Types.ObjectId(),
@@ -76,21 +78,25 @@ export async function POST(request: NextRequest) {
       paymentDate: new Date(paymentDate),
       processedAt: new Date(),
       bankReference,
+      paymentReferenceId,
+      bankName,
       notes,
       createdByUserId: userId,
     });
-    
+
     await payment.save();
-    
+
     // Update invoice status
     const newTotalPaid = alreadyPaid + paymentAmount;
+    invoice.paidAmount = newTotalPaid;
+
     if (newTotalPaid >= invoice.totalAmount) {
       invoice.status = 'paid';
     } else {
       invoice.status = 'partially_paid';
     }
     await invoice.save();
-    
+
     // Post to GL
     await postPaymentToGL(
       tenantId,
@@ -100,7 +106,7 @@ export async function POST(request: NextRequest) {
       paymentMethod,
       userId
     );
-    
+
     return NextResponse.json({
       success: true,
       payment: {

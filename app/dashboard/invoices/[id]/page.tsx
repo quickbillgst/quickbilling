@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import {
     Select,
     SelectContent,
@@ -38,6 +39,8 @@ interface LineItem {
     unitPrice: number;
     taxRate: number;
     discount?: number;
+    discountValue?: number;
+    discountType?: 'percentage' | 'fixed';
     lineAmount?: number;
     lineTax?: number;
 }
@@ -82,9 +85,16 @@ export default function InvoiceEditPage() {
         { revalidateOnFocus: false }
     );
 
+    const { data: settingsData } = useSWR(
+        token ? '/api/settings' : null,
+        fetcher,
+        { revalidateOnFocus: false }
+    );
+
     const customers = customersData?.data || [];
     const products = productsData?.data || [];
     const signatures = signaturesData?.data?.signatures || [];
+    const bankAccounts = settingsData?.data?.bankAccounts || [];
 
     // Form state
     const [formData, setFormData] = useState({
@@ -93,6 +103,9 @@ export default function InvoiceEditPage() {
         dueDate: '',
         status: 'draft',
         notes: '',
+        terms: '',
+        bankAccountId: '',
+        enableRoundOff: true,
         signatureIndex: 0,
     });
 
@@ -107,32 +120,43 @@ export default function InvoiceEditPage() {
             // Extract customer ID - handle both populated object and plain ID
             let customerId = '';
             if (invoice.customerId) {
-                if (typeof invoice.customerId === 'object' && invoice.customerId._id) {
-                    customerId = String(invoice.customerId._id);
-                } else if (typeof invoice.customerId === 'string') {
-                    customerId = invoice.customerId;
+                if (typeof invoice.customerId === 'object' && (invoice.customerId._id || invoice.customerId.id)) {
+                    customerId = String(invoice.customerId._id || invoice.customerId.id);
                 } else {
                     customerId = String(invoice.customerId);
                 }
             }
 
-            console.log('Setting customerId:', customerId);
+            const formatDateForInput = (dateStr: any) => {
+                if (!dateStr) return '';
+                try {
+                    const d = new Date(dateStr);
+                    if (isNaN(d.getTime())) return '';
+                    return d.toISOString().split('T')[0];
+                } catch (e) {
+                    return '';
+                }
+            };
 
             setFormData({
                 customerId: customerId,
-                invoiceDate: invoice.invoiceDate ? new Date(invoice.invoiceDate).toISOString().split('T')[0] : '',
-                dueDate: invoice.dueDate ? new Date(invoice.dueDate).toISOString().split('T')[0] : '',
+                invoiceDate: formatDateForInput(invoice.invoiceDate),
+                dueDate: formatDateForInput(invoice.dueDate),
                 status: invoice.status || 'draft',
                 notes: invoice.notes || '',
+                terms: invoice.terms || '',
+                bankAccountId: invoice.bankAccountId || '',
+                enableRoundOff: invoice.enableRoundOff !== false,
                 signatureIndex: invoice.signatureIndex || 0,
             });
 
             if (invoice.lineItems && Array.isArray(invoice.lineItems)) {
                 setLineItems(invoice.lineItems.map((item: any, index: number) => {
-                    // Try to find matching product by ID or by matching description if products are available
+                    // We'll match products once they load or if they are already here
+                    const currentProducts = productsData?.data || [];
                     let matchedProductId = item.productId;
-                    if (!matchedProductId && item.description && products.length > 0) {
-                        const matchedProduct = products.find((p: any) =>
+                    if (!matchedProductId && item.description && currentProducts.length > 0) {
+                        const matchedProduct = currentProducts.find((p: any) =>
                             p.name === item.description || p.name.toLowerCase() === item.description.toLowerCase()
                         );
                         if (matchedProduct) {
@@ -141,7 +165,7 @@ export default function InvoiceEditPage() {
                     }
 
                     return {
-                        id: String(Date.now() + index), // Generate temporary ID
+                        id: item._id || String(Date.now() + index),
                         productId: matchedProductId || '',
                         description: item.description || '',
                         hsnCode: item.hsnCode || '',
@@ -149,6 +173,8 @@ export default function InvoiceEditPage() {
                         unitPrice: item.unitPrice || 0,
                         taxRate: item.taxRate || 0,
                         discount: item.discount || 0,
+                        discountValue: item.discountValue !== undefined ? item.discountValue : (item.discount || 0),
+                        discountType: item.discountType || 'fixed',
                         lineAmount: item.lineAmount || 0,
                         lineTax: item.lineTax || 0,
                     };
@@ -157,11 +183,14 @@ export default function InvoiceEditPage() {
 
             isInitialized.current = true;
         }
-    }, [invoiceData, products]); // Products needed for matching logic, but isInitialized protects from reset
+    }, [invoiceData, productsData]); // Keep productsData in dependencies to trigger re-match if it loads later
+
+    const rawInvoice = invoiceData?.data;
+    const populatedCustomer = rawInvoice?.customerId && typeof rawInvoice.customerId === 'object' ? rawInvoice.customerId : null;
 
     const selectedCustomer = customers.find(
-        (c: any) => String(c._id) === formData.customerId
-    );
+        (c: any) => String(c._id) === String(formData.customerId)
+    ) || (formData.customerId && populatedCustomer && String(populatedCustomer._id) === String(formData.customerId) ? populatedCustomer : null);
 
     // Calculate totals
     const calculateTotals = () => {
@@ -171,7 +200,13 @@ export default function InvoiceEditPage() {
 
         lineItems.forEach((item) => {
             const lineAmount = item.quantity * item.unitPrice;
-            const discount = item.discount || 0;
+            let discount = 0;
+            if (item.discountType === 'percentage') {
+                discount = (lineAmount * (item.discountValue || 0)) / 100;
+            } else {
+                discount = item.discountValue || 0;
+            }
+
             const taxable = lineAmount - discount;
             const tax = taxable * (item.taxRate / 100);
 
@@ -180,12 +215,17 @@ export default function InvoiceEditPage() {
             totalTax += tax;
         });
 
+        const rawGrandTotal = subtotal - totalDiscount + totalTax;
+        const grandTotal = formData.enableRoundOff ? Math.round(rawGrandTotal) : rawGrandTotal;
+        const roundOff = grandTotal - rawGrandTotal;
+
         return {
             subtotal,
             totalDiscount,
             taxable: subtotal - totalDiscount,
             totalTax,
-            grandTotal: subtotal - totalDiscount + totalTax,
+            grandTotal,
+            roundOff,
         };
     };
 
@@ -252,6 +292,9 @@ export default function InvoiceEditPage() {
                     dueDate: formData.dueDate || undefined,
                     status: formData.status,
                     notes: formData.notes,
+                    terms: formData.terms,
+                    bankAccountId: formData.bankAccountId,
+                    enableRoundOff: formData.enableRoundOff,
                     signatureIndex: formData.signatureIndex,
                     lineItems: lineItems.map((item) => ({
                         productId: item.productId || undefined,
@@ -260,7 +303,8 @@ export default function InvoiceEditPage() {
                         quantity: item.quantity,
                         unitPrice: item.unitPrice,
                         taxRate: item.taxRate,
-                        discount: item.discount || 0,
+                        discountValue: item.discountValue || 0,
+                        discountType: item.discountType || 'fixed',
                     })),
                 }),
             });
@@ -381,6 +425,12 @@ export default function InvoiceEditPage() {
                                                 {customer.gstin && ` (${customer.gstin})`}
                                             </SelectItem>
                                         ))}
+                                        {/* Fallback for selected customer if not in the current list */}
+                                        {selectedCustomer && !customers.find((c: any) => String(c._id) === String(selectedCustomer._id)) && (
+                                            <SelectItem value={String(selectedCustomer._id)}>
+                                                {selectedCustomer.name} {selectedCustomer.gstin && ` (${selectedCustomer.gstin})`}
+                                            </SelectItem>
+                                        )}
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -454,19 +504,27 @@ export default function InvoiceEditPage() {
 
                         {selectedCustomer && (
                             <div className="border-t pt-4">
-                                <div className="grid grid-cols-3 gap-4 text-sm">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                                     <div>
-                                        <p className="text-slate-600 font-semibold">Customer Name</p>
-                                        <p className="text-slate-900">{selectedCustomer.name}</p>
+                                        <p className="text-slate-600 font-semibold text-xs mb-1 uppercase tracking-wider">Customer Name</p>
+                                        <p className="text-slate-900 font-medium">{selectedCustomer.name}</p>
                                     </div>
                                     <div>
-                                        <p className="text-slate-600 font-semibold">GSTIN</p>
+                                        <p className="text-slate-600 font-semibold text-xs mb-1 uppercase tracking-wider">Email</p>
+                                        <p className="text-slate-900">{selectedCustomer.email || 'N/A'}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-slate-600 font-semibold text-xs mb-1 uppercase tracking-wider">Phone</p>
+                                        <p className="text-slate-900">{selectedCustomer.phone || 'N/A'}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-slate-600 font-semibold text-xs mb-1 uppercase tracking-wider">GSTIN</p>
                                         <p className="font-mono text-slate-900">
                                             {selectedCustomer.gstin || 'Unregistered'}
                                         </p>
                                     </div>
-                                    <div>
-                                        <p className="text-slate-600 font-semibold">State</p>
+                                    <div className="md:col-span-4">
+                                        <p className="text-slate-600 font-semibold text-xs mb-1 uppercase tracking-wider">State (Place of Supply)</p>
                                         <p className="text-slate-900">{selectedCustomer.billingAddress?.state || 'N/A'}</p>
                                     </div>
                                 </div>
@@ -582,18 +640,35 @@ export default function InvoiceEditPage() {
                                                         />
                                                     </TableCell>
                                                     <TableCell>
-                                                        <Input
-                                                            type="number"
-                                                            value={item.discount || ''}
-                                                            onChange={(e) =>
-                                                                updateLineItem(itemId, {
-                                                                    discount: parseFloat(e.target.value) || 0,
-                                                                })
-                                                            }
-                                                            className="w-24 text-right"
-                                                            placeholder="0"
-                                                            disabled={isPaid}
-                                                        />
+                                                        <div className="flex flex-col gap-1">
+                                                            <Input
+                                                                type="number"
+                                                                value={item.discountValue || ''}
+                                                                onChange={(e) =>
+                                                                    updateLineItem(itemId, {
+                                                                        discountValue: parseFloat(e.target.value) || 0,
+                                                                    })
+                                                                }
+                                                                className="w-24 text-right"
+                                                                placeholder="0"
+                                                                disabled={isPaid}
+                                                            />
+                                                            <Select
+                                                                value={item.discountType || 'fixed'}
+                                                                onValueChange={(val: 'percentage' | 'fixed') =>
+                                                                    updateLineItem(itemId, { discountType: val })
+                                                                }
+                                                                disabled={isPaid}
+                                                            >
+                                                                <SelectTrigger className="w-24 h-7 text-[10px]">
+                                                                    <SelectValue />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="percentage">% Percent</SelectItem>
+                                                                    <SelectItem value="fixed">₹ Fixed</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
                                                     </TableCell>
                                                     <TableCell className="text-right font-semibold">
                                                         {item.taxRate}%
@@ -639,15 +714,30 @@ export default function InvoiceEditPage() {
                                     </div>
                                 )}
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-slate-600">Taxable Amount</span>
-                                    <span className="font-mono">₹{totals.taxable.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                                </div>
-                                <div className="flex justify-between text-sm">
                                     <span className="text-slate-600">Tax</span>
                                     <span className="font-mono">₹{totals.totalTax.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                                 </div>
+
+                                <div className="flex items-center justify-between py-2 border-t mt-2">
+                                    <div className="flex items-center space-x-2">
+                                        <Switch
+                                            id="round-off"
+                                            checked={formData.enableRoundOff}
+                                            onCheckedChange={(c) => setFormData({ ...formData, enableRoundOff: c })}
+                                            disabled={isPaid}
+                                        />
+                                        <Label htmlFor="round-off" className="text-xs cursor-pointer">Round Off</Label>
+                                    </div>
+                                    {formData.enableRoundOff && (
+                                        <span className="font-mono text-xs text-slate-500">
+                                            {totals.roundOff >= 0 ? '+' : ''}
+                                            {totals.roundOff.toFixed(2)}
+                                        </span>
+                                    )}
+                                </div>
+
                                 <div className="flex justify-between text-lg font-bold border-t pt-2">
-                                    <span>Total</span>
+                                    <span>Total Amount</span>
                                     <span className="text-green-600 font-mono">
                                         ₹{totals.grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                                     </span>
@@ -657,19 +747,51 @@ export default function InvoiceEditPage() {
                     </CardContent>
                 </Card>
 
-                {/* Notes */}
+                {/* Notes and Terms */}
                 <Card>
                     <CardHeader>
-                        <CardTitle>Notes</CardTitle>
+                        <CardTitle>Additional Details</CardTitle>
                     </CardHeader>
-                    <CardContent>
-                        <Textarea
-                            value={formData.notes}
-                            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                            placeholder="Add any notes or terms for this invoice..."
-                            rows={3}
-                            disabled={isPaid}
-                        />
+                    <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                            <Label>Notes</Label>
+                            <Textarea
+                                value={formData.notes}
+                                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                                placeholder="Add any notes..."
+                                rows={2}
+                                disabled={isPaid}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Terms & Conditions</Label>
+                            <Textarea
+                                value={formData.terms}
+                                onChange={(e) => setFormData({ ...formData, terms: e.target.value })}
+                                placeholder="Add terms and conditions..."
+                                rows={2}
+                                disabled={isPaid}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Select Bank Account (for PDF)</Label>
+                            <Select
+                                value={formData.bankAccountId}
+                                onValueChange={(val) => setFormData({ ...formData, bankAccountId: val })}
+                                disabled={isPaid}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select Bank Account" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {bankAccounts.map((acc: any, i: number) => (
+                                        <SelectItem key={i} value={acc._id || acc.accountNumber}>
+                                            {acc.bankName} - {acc.accountNumber} {acc.isDefault ? '(Default)' : ''}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </CardContent>
                 </Card>
 

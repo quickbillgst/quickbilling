@@ -2,7 +2,7 @@
 
 import React from "react"
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -27,9 +29,41 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Plus, Trash2, AlertCircle, CheckCircle } from 'lucide-react';
+import { Plus, Trash2, AlertCircle, CheckCircle, Loader2, ArrowLeft, Save, Package, IndianRupee, Layers, FileText, Barcode, RefreshCw } from 'lucide-react';
 import { calculateInvoiceTax, calculateLineItemTax } from '@/lib/services/gst-service';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+
+// Schema for Product (Copied from product page)
+const productSchema = z.object({
+  sku: z.string().min(1, 'SKU is required'),
+  name: z.string().min(2, 'Product Name must be at least 2 characters'),
+  description: z.string().optional(),
+  hsnCode: z.string().optional(),
+  sacCode: z.string().optional(),
+  taxRate: z.coerce.number(),
+  gstType: z.enum(['cgst_sgst', 'igst', 'exempt']),
+  costPrice: z.coerce.number().optional().default(0),
+  sellingPrice: z.coerce.number().min(0.01, 'Selling Price must be greater than 0'),
+  trackInventory: z.boolean().default(true),
+  reorderPoint: z.coerce.number().optional().default(10),
+  barcodeValue: z.string().optional(),
+  barcodeType: z.enum(['ean13', 'code128', 'qr']).default('ean13'),
+  isService: z.boolean().default(false)
+});
+type ProductFormData = z.infer<typeof productSchema>;
 
 interface LineItem {
   id: string;
@@ -63,13 +97,13 @@ export default function NewInvoicePage() {
     return response.json();
   };
 
-  const { data: customersData } = useSWR(
+  const { data: customersData, mutate: mutateCustomers } = useSWR(
     token ? '/api/customers' : null,
     fetcher,
     { revalidateOnFocus: false }
   );
 
-  const { data: productsData } = useSWR(
+  const { data: productsData, mutate: mutateProducts } = useSWR(
     token ? '/api/products' : null,
     fetcher,
     { revalidateOnFocus: false }
@@ -78,14 +112,143 @@ export default function NewInvoicePage() {
   const customers = customersData?.data || [];
   const products = productsData?.data || [];
 
+  // Dialog States
+  const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false);
+  const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
+  const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
+  const [isCreatingProduct, setIsCreatingProduct] = useState(false);
+
+  // New Customer Form State
+  const [newCustomerData, setNewCustomerData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    customerType: 'business',
+    gstRegistered: false,
+    gstin: '',
+    pan: '',
+    tdsApplicable: false,
+    tdsRate: 2.5,
+    creditLimit: 0,
+    billingAddress: {
+      line1: '',
+      line2: '',
+      city: '',
+      state: '',
+      pincode: ''
+    }
+  });
+
+  // New Product Form Hook
+  const {
+    register: registerProduct,
+    handleSubmit: handleProductSubmit,
+    watch: watchProduct,
+    setValue: setValueProduct,
+    formState: { errors: productErrors },
+    reset: resetProductForm
+  } = useForm<ProductFormData>({
+    resolver: zodResolver(productSchema),
+    defaultValues: {
+      sku: '',
+      name: '',
+      description: '',
+      hsnCode: '',
+      sacCode: '',
+      taxRate: 18,
+      gstType: 'cgst_sgst',
+      costPrice: 0,
+      sellingPrice: 0,
+      trackInventory: true,
+      reorderPoint: 10,
+      barcodeValue: '',
+      barcodeType: 'ean13',
+      isService: false
+    },
+  });
+
+  const isService = watchProduct('isService');
+  const sellingPrice = watchProduct('sellingPrice');
+
+  const handleCreateCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsCreatingCustomer(true);
+    try {
+      const res = await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(newCustomerData)
+      });
+      if (!res.ok) throw new Error('Failed to create customer');
+
+      const { data } = await res.json();
+      toast.success('Customer created!');
+      await mutateCustomers(); // Refresh list
+      setFormData(prev => ({ ...prev, customerId: data._id })); // Auto-select
+      setIsCustomerDialogOpen(false);
+      // Reset form
+      setNewCustomerData({
+        name: '', email: '', phone: '', customerType: 'business', gstRegistered: false, gstin: '', pan: '', tdsApplicable: false, tdsRate: 2.5, creditLimit: 0, billingAddress: { line1: '', line2: '', city: '', state: '', pincode: '' }
+      });
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setIsCreatingCustomer(false);
+    }
+  };
+
+  const onProductSubmit = async (data: ProductFormData) => {
+    try {
+      // Calculate base price (excluding GST) from inclusive price
+      const basePrice = data.sellingPrice / (1 + (data.taxRate / 100));
+
+      const res = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          ...data,
+          sellingPrice: parseFloat(basePrice.toFixed(2)) // Store exclusive price
+        })
+      });
+      if (!res.ok) throw new Error('Failed to create product');
+
+      toast.success('Product created!');
+      await mutateProducts();
+      setIsProductDialogOpen(false);
+      resetProductForm();
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setIsCreatingProduct(false);
+    }
+  };
+
+  const generateSku = async () => {
+    try {
+      const res = await fetch('/api/products/generate-sku', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Failed to generate SKU');
+      const data = await res.json();
+      setValueProduct('sku', data.sku, { shouldValidate: true });
+      toast.success('SKU generated');
+    } catch (error) {
+      toast.error('Could not auto-generate SKU');
+    }
+  };
+
   // Settings for Invoice Number
   const [invoiceSettings, setInvoiceSettings] = useState({
     gstPrefix: 'INV-',
     gstNextNumber: 1,
     nonGstPrefix: 'BILL-',
-    nonGstNextNumber: 1
+    nonGstNextNumber: 1,
+    gstSeries: [] as Array<{ prefix: string, nextNumber: number }>,
+    nonGstSeries: [] as Array<{ prefix: string, nextNumber: number }>,
+    bankAccounts: [] as any[]
   });
   const [isGstBill, setIsGstBill] = useState(true);
+  const [selectedPrefix, setSelectedPrefix] = useState(''); // To store the user's choice
 
   React.useEffect(() => {
     if (token) {
@@ -95,17 +258,45 @@ export default function NewInvoicePage() {
         .then(res => res.json())
         .then(data => {
           if (data.success && data.data) {
+            // Ensure we have at least one default if arrays are empty
+            const gstSeries = data.data.gstInvoiceSeries?.length ? data.data.gstInvoiceSeries : [{ prefix: data.data.invoicePrefix || 'INV-', nextNumber: data.data.nextInvoiceNumber || 1 }];
+            const nonGstSeries = data.data.nonGstInvoiceSeries?.length ? data.data.nonGstInvoiceSeries : [{ prefix: data.data.nonGstInvoicePrefix || 'BILL-', nextNumber: data.data.nextNonGstInvoiceNumber || 1 }];
+
+            // Bank Accounts Logic
+            const bankAccounts = data.data.bankAccounts && data.data.bankAccounts.length > 0
+              ? data.data.bankAccounts
+              : (data.data.bankDetails?.accountNumber ? [{ ...data.data.bankDetails, isDefault: true, _id: 'legacy' }] : []);
+
             setInvoiceSettings({
-              gstPrefix: data.data.invoicePrefix || 'INV-',
-              gstNextNumber: data.data.nextInvoiceNumber || 1,
-              nonGstPrefix: data.data.nonGstInvoicePrefix || 'BILL-',
-              nonGstNextNumber: data.data.nextNonGstInvoiceNumber || 1
+              gstPrefix: gstSeries[0].prefix,
+              gstNextNumber: gstSeries[0].nextNumber,
+              nonGstPrefix: nonGstSeries[0].prefix,
+              nonGstNextNumber: nonGstSeries[0].nextNumber,
+              gstSeries,
+              nonGstSeries,
+              bankAccounts
             });
+
+            // Set initial selected prefix
+            setSelectedPrefix(isGstBill ? gstSeries[0].prefix : nonGstSeries[0].prefix);
+
+            // Set default bank account if available
+            const defaultBank = bankAccounts.find((b: any) => b.isDefault) || bankAccounts[0];
+            if (defaultBank) {
+              setFormData(prev => ({ ...prev, bankAccountId: defaultBank._id || defaultBank.accountNumber })); // Use account number as ID if ID missing (legacy)
+            }
           }
         })
         .catch(err => console.error("Failed to fetch settings", err));
     }
   }, [token]);
+
+  // Effect to update selected prefix when GST toggle changes
+  React.useEffect(() => {
+    if (invoiceSettings.gstSeries.length && invoiceSettings.nonGstSeries.length) {
+      setSelectedPrefix(isGstBill ? invoiceSettings.gstSeries[0].prefix : invoiceSettings.nonGstSeries[0].prefix);
+    }
+  }, [isGstBill, invoiceSettings.gstSeries, invoiceSettings.nonGstSeries]);
 
   // Signatures state
   const [signatures, setSignatures] = useState<Array<{ name: string; designation: string; image: string }>>([]);
@@ -131,13 +322,17 @@ export default function NewInvoicePage() {
     invoiceDate: new Date().toISOString().split('T')[0],
     dueDate: '',
     signatureIndex: 0,
+    notes: '',
+    terms: '',
+    bankAccountId: '',
+    enableRoundOff: true
   });
 
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   // ... (keep discountAmount and taxSummary if needed, though mostly derived)
 
   const selectedCustomer = customers.find(
-    (c: any) => c._id === formData.customerId
+    (c: any) => String(c._id) === String(formData.customerId)
   );
 
   // Toggle GST Mode
@@ -278,8 +473,13 @@ export default function NewInvoicePage() {
           })),
           isExport: false,
           isSez: false,
-          isGstBill: isGstBill, // Optional: Pass this if backend needs it, but taxRate 0 handling is usually enough
+          isGstBill: isGstBill,
+          prefix: selectedPrefix, // Pass the selected prefix so backend knows which series to increment
           signatureIndex: formData.signatureIndex, // Selected signature for PDF
+          notes: formData.notes,
+          terms: formData.terms,
+          bankAccountId: formData.bankAccountId,
+          enableRoundOff: formData.enableRoundOff,
         }),
       });
 
@@ -321,43 +521,161 @@ export default function NewInvoicePage() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="space-y-2">
-                <Label>Invoice Number</Label>
-                <Input
-                  value={
-                    isGstBill
-                      ? `${invoiceSettings.gstPrefix}${String(invoiceSettings.gstNextNumber).padStart(5, '0')}`
-                      : `${invoiceSettings.nonGstPrefix}${String(invoiceSettings.nonGstNextNumber).padStart(5, '0')}`
-                  }
-                  disabled
-                  className="font-mono bg-slate-50"
-                />
-                <p className="text-xs text-slate-500">Auto-generated based on settings</p>
+                <Label>Invoice Series</Label>
+                <div className="flex gap-2">
+                  <Select
+                    value={selectedPrefix}
+                    onValueChange={setSelectedPrefix}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(isGstBill ? invoiceSettings.gstSeries : invoiceSettings.nonGstSeries).map((s, idx) => (
+                        <SelectItem key={idx} value={s.prefix}>
+                          {s.prefix}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="flex items-center px-3 border rounded-md bg-slate-50 text-slate-500 font-mono">
+                    {(isGstBill ? invoiceSettings.gstSeries : invoiceSettings.nonGstSeries).find(s => s.prefix === selectedPrefix)?.nextNumber || 1}
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500">Auto-generated sequence</p>
               </div>
 
               <div className="space-y-2">
                 <Label>Customer *</Label>
-                <Select
-                  value={formData.customerId}
-                  onValueChange={(value) => setFormData({ ...formData, customerId: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select customer" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {customers.length === 0 ? (
-                      <div className="p-2 text-sm text-slate-600">
-                        No customers found. Create one first.
-                      </div>
-                    ) : (
-                      customers.map((customer: any) => (
-                        <SelectItem key={customer._id} value={customer._id}>
-                          {customer.name}
-                          {customer.gstin && ` (${customer.gstin})`}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
+                <div className="flex gap-2">
+                  <Select
+                    value={formData.customerId}
+                    onValueChange={(value) => setFormData({ ...formData, customerId: value })}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select customer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {customers.length === 0 ? (
+                        <div className="p-2 text-sm text-slate-600">
+                          No customers found. Create one first.
+                        </div>
+                      ) : (
+                        customers.map((customer: any) => (
+                          <SelectItem key={String(customer._id)} value={String(customer._id)}>
+                            {customer.name}
+                            {customer.gstin && ` (${customer.gstin})`}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+
+                  <Dialog open={isCustomerDialogOpen} onOpenChange={setIsCustomerDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" size="icon" title="Add New Customer">
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle>Add New Customer</DialogTitle>
+                        <DialogDescription>Create a new customer profile instantly.</DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={handleCreateCustomer} className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label>Customer Name *</Label>
+                            <Input required value={newCustomerData.name} onChange={e => setNewCustomerData({ ...newCustomerData, name: e.target.value })} placeholder="e.g. John Doe" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Customer Type</Label>
+                            <Select value={newCustomerData.customerType} onValueChange={(value) => setNewCustomerData({ ...newCustomerData, customerType: value })}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="individual">Individual</SelectItem>
+                                <SelectItem value="business">Business</SelectItem>
+                                <SelectItem value="government">Government</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Email</Label>
+                            <Input type="email" value={newCustomerData.email} onChange={e => setNewCustomerData({ ...newCustomerData, email: e.target.value })} placeholder="email@example.com" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Phone</Label>
+                            <Input value={newCustomerData.phone} onChange={e => setNewCustomerData({ ...newCustomerData, phone: e.target.value })} placeholder="9876543210" />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-2 border p-3 rounded-md">
+                          <Checkbox id="nc_gst" checked={newCustomerData.gstRegistered} onCheckedChange={(c) => setNewCustomerData({ ...newCustomerData, gstRegistered: c as boolean })} />
+                          <Label htmlFor="nc_gst" className="cursor-pointer">GST Registered</Label>
+                        </div>
+
+                        {newCustomerData.gstRegistered && (
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label>GSTIN</Label>
+                              <Input value={newCustomerData.gstin} onChange={e => setNewCustomerData({ ...newCustomerData, gstin: e.target.value })} placeholder="29XXXXX..." />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>PAN</Label>
+                              <Input value={newCustomerData.pan} onChange={e => setNewCustomerData({ ...newCustomerData, pan: e.target.value })} placeholder="ABCDE1234F" />
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center space-x-2 border p-3 rounded-md">
+                          <Checkbox id="nc_tds" checked={newCustomerData.tdsApplicable} onCheckedChange={(c) => setNewCustomerData({ ...newCustomerData, tdsApplicable: c as boolean })} />
+                          <Label htmlFor="nc_tds" className="cursor-pointer">TDS Applicable</Label>
+                        </div>
+
+                        {newCustomerData.tdsApplicable && (
+                          <div className="space-y-2 pl-2">
+                            <Label>TDS Rate (%)</Label>
+                            <Input type="number" step="0.1" value={newCustomerData.tdsRate} onChange={e => setNewCustomerData({ ...newCustomerData, tdsRate: parseFloat(e.target.value) })} />
+                          </div>
+                        )}
+
+                        <div className="space-y-3 border-t pt-3">
+                          <Label className="font-semibold">Billing Address</Label>
+                          <Input placeholder="Address Line 1" value={newCustomerData.billingAddress.line1} onChange={e => setNewCustomerData({ ...newCustomerData, billingAddress: { ...newCustomerData.billingAddress, line1: e.target.value } })} />
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input placeholder="City" value={newCustomerData.billingAddress.city} onChange={e => setNewCustomerData({ ...newCustomerData, billingAddress: { ...newCustomerData.billingAddress, city: e.target.value } })} />
+                            <Select value={newCustomerData.billingAddress.state} onValueChange={v => setNewCustomerData({ ...newCustomerData, billingAddress: { ...newCustomerData.billingAddress, state: v } })}>
+                              <SelectTrigger><SelectValue placeholder="State" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="MH">Maharashtra</SelectItem>
+                                <SelectItem value="DL">Delhi</SelectItem>
+                                <SelectItem value="KA">Karnataka</SelectItem>
+                                <SelectItem value="TN">Tamil Nadu</SelectItem>
+                                <SelectItem value="GJ">Gujarat</SelectItem>
+                                <SelectItem value="WB">West Bengal</SelectItem>
+                                <SelectItem value="UP">Uttar Pradesh</SelectItem>
+                                <SelectItem value="RJ">Rajasthan</SelectItem>
+                                <SelectItem value="MP">Madhya Pradesh</SelectItem>
+                                <SelectItem value="TG">Telangana</SelectItem>
+                                <SelectItem value="AP">Andhra Pradesh</SelectItem>
+                                <SelectItem value="KL">Kerala</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <Input placeholder="Pincode" value={newCustomerData.billingAddress.pincode} onChange={e => setNewCustomerData({ ...newCustomerData, billingAddress: { ...newCustomerData.billingAddress, pincode: e.target.value } })} />
+                        </div>
+
+                        <DialogFooter className="pt-4">
+                          <Button type="button" variant="outline" onClick={() => setIsCustomerDialogOpen(false)}>Cancel</Button>
+                          <Button type="submit" disabled={isCreatingCustomer}>
+                            {isCreatingCustomer && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                            Create Customer
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -412,21 +730,28 @@ export default function NewInvoicePage() {
             </div>
 
             {selectedCustomer && (
-              // ... (keep customer info display)
               <div className="border-t pt-4">
-                <div className="grid grid-cols-3 gap-4 text-sm">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div>
-                    <p className="text-slate-600 font-semibold">Customer Name</p>
-                    <p className="text-slate-900">{selectedCustomer.name}</p>
+                    <p className="text-slate-600 font-semibold text-xs mb-1 uppercase tracking-wider">Customer Name</p>
+                    <p className="text-slate-900 font-medium">{selectedCustomer.name}</p>
                   </div>
                   <div>
-                    <p className="text-slate-600 font-semibold">GSTIN</p>
+                    <p className="text-slate-600 font-semibold text-xs mb-1 uppercase tracking-wider">Email</p>
+                    <p className="text-slate-900">{selectedCustomer.email || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-600 font-semibold text-xs mb-1 uppercase tracking-wider">Phone</p>
+                    <p className="text-slate-900">{selectedCustomer.phone || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-600 font-semibold text-xs mb-1 uppercase tracking-wider">GSTIN</p>
                     <p className="font-mono text-slate-900">
                       {selectedCustomer.gstin || 'Unregistered'}
                     </p>
                   </div>
-                  <div>
-                    <p className="text-slate-600 font-semibold">State</p>
+                  <div className="md:col-span-4">
+                    <p className="text-slate-600 font-semibold text-xs mb-1 uppercase tracking-wider">State (Place of Supply)</p>
                     <p className="text-slate-900">{selectedCustomer.billingAddress?.state || 'N/A'}</p>
                   </div>
                 </div>
@@ -476,25 +801,40 @@ export default function NewInvoicePage() {
                     {lineItems.map((item, idx) => (
                       <TableRow key={item.id}>
                         <TableCell>
-                          <Select
-                            value={item.productId || ''}
-                            onValueChange={(val) => selectProduct(item.id, val)}
-                          >
-                            <SelectTrigger className="w-48">
-                              <SelectValue placeholder="Select product" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {products.length === 0 ? (
-                                <div className="p-2 text-sm text-slate-500">No products found</div>
-                              ) : (
-                                products.map((p: any) => (
-                                  <SelectItem key={p._id} value={p._id}>
-                                    {p.name}
-                                  </SelectItem>
-                                ))
-                              )}
-                            </SelectContent>
-                          </Select>
+                          <div className="flex gap-2 items-center">
+                            <Select
+                              value={item.productId || ''}
+                              onValueChange={(val) => selectProduct(item.id, val)}
+                            >
+                              <SelectTrigger className="w-full min-w-[150px]">
+                                <SelectValue placeholder="Select product" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {products.length === 0 ? (
+                                  <div className="p-2 text-sm text-slate-500">No products found</div>
+                                ) : (
+                                  products.map((p: any) => (
+                                    <SelectItem key={p._id} value={p._id}>
+                                      {p.name}
+                                    </SelectItem>
+                                  ))
+                                )}
+                              </SelectContent>
+                            </Select>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-9 w-9 border shrink-0"
+                              onClick={() => {
+                                resetProductForm();
+                                setIsProductDialogOpen(true);
+                              }}
+                              title="Add New Product"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Input
@@ -524,17 +864,33 @@ export default function NewInvoicePage() {
                           />
                         </TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
-                            value={item.discountValue || ''}
-                            onChange={(e) =>
-                              updateLineItem(item.id, {
-                                discountValue: parseFloat(e.target.value) || 0,
-                              })
-                            }
-                            className="w-24 text-right"
-                            placeholder="0"
-                          />
+                          <div className="flex flex-col gap-1">
+                            <Input
+                              type="number"
+                              value={item.discountValue || ''}
+                              onChange={(e) =>
+                                updateLineItem(item.id, {
+                                  discountValue: parseFloat(e.target.value) || 0,
+                                })
+                              }
+                              className="w-24 text-right"
+                              placeholder="0"
+                            />
+                            <Select
+                              value={item.discountType || 'fixed'}
+                              onValueChange={(val: 'percentage' | 'fixed') =>
+                                updateLineItem(item.id, { discountType: val })
+                              }
+                            >
+                              <SelectTrigger className="w-24 h-7 text-[10px]">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="percentage">% Percent</SelectItem>
+                                <SelectItem value="fixed">₹ Fixed</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </TableCell>
                         <TableCell className="text-right font-semibold">
                           {isGstBill ? item.taxRate : 0}%
@@ -646,15 +1002,26 @@ export default function NewInvoicePage() {
                 </div>
               </div>
 
-              <div className="border-t pt-4">
+              <div className="border-t pt-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Switch id="round-off-gst" checked={formData.enableRoundOff} onCheckedChange={(c) => setFormData({ ...formData, enableRoundOff: c })} />
+                    <Label htmlFor="round-off-gst" className="cursor-pointer">Round Off</Label>
+                  </div>
+                  {formData.enableRoundOff && (
+                    <span className="text-slate-600 font-mono text-sm">
+                      {(Math.round(totals.lineAmount - totals.discountAmount + totals.taxAmount) - (totals.lineAmount - totals.discountAmount + totals.taxAmount)) > 0 ? '+' : ''}
+                      {(Math.round(totals.lineAmount - totals.discountAmount + totals.taxAmount) - (totals.lineAmount - totals.discountAmount + totals.taxAmount)).toFixed(2)}
+                    </span>
+                  )}
+                </div>
                 <div className="flex justify-between items-baseline">
                   <span className="text-lg font-bold">Total Amount</span>
                   <span className="text-2xl font-bold text-green-600 font-mono">
                     ₹
-                    {(
-                      totals.lineAmount -
-                      totals.discountAmount +
-                      totals.taxAmount
+                    {(formData.enableRoundOff
+                      ? Math.round(totals.lineAmount - totals.discountAmount + totals.taxAmount)
+                      : (totals.lineAmount - totals.discountAmount + totals.taxAmount)
                     ).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                   </span>
                 </div>
@@ -686,14 +1053,26 @@ export default function NewInvoicePage() {
         {/* Total for Non-GST */}
         {!isGstBill && (
           <Card>
-            <CardContent className="pt-6">
+            <CardContent className="pt-6 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Switch id="round-off-nongst" checked={formData.enableRoundOff} onCheckedChange={(c) => setFormData({ ...formData, enableRoundOff: c })} />
+                  <Label htmlFor="round-off-nongst" className="cursor-pointer">Round Off</Label>
+                </div>
+                {formData.enableRoundOff && (
+                  <span className="text-slate-600 font-mono text-sm">
+                    {(Math.round(totals.lineAmount - totals.discountAmount) - (totals.lineAmount - totals.discountAmount)) > 0 ? '+' : ''}
+                    {(Math.round(totals.lineAmount - totals.discountAmount) - (totals.lineAmount - totals.discountAmount)).toFixed(2)}
+                  </span>
+                )}
+              </div>
               <div className="flex justify-between items-baseline">
                 <span className="text-lg font-bold">Total Amount</span>
                 <span className="text-2xl font-bold text-green-600 font-mono">
                   ₹
-                  {(
-                    totals.lineAmount -
-                    totals.discountAmount
+                  {(formData.enableRoundOff
+                    ? Math.round(totals.lineAmount - totals.discountAmount)
+                    : (totals.lineAmount - totals.discountAmount)
                   ).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                 </span>
               </div>
@@ -701,8 +1080,46 @@ export default function NewInvoicePage() {
           </Card>
         )}
 
-        {/* Actions - keep same */}
-        <div className="flex justify-end gap-4">
+        <Card className="mt-6 border shadow-sm">
+          <CardHeader><CardTitle className="text-lg">Additional Details</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="inv-notes">Notes</Label>
+              <Textarea
+                id="inv-notes"
+                value={formData.notes}
+                onChange={e => setFormData({ ...formData, notes: e.target.value })}
+                placeholder="Thank you for your business..."
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="inv-terms">Terms & Conditions</Label>
+              <Textarea
+                id="inv-terms"
+                value={formData.terms}
+                onChange={e => setFormData({ ...formData, terms: e.target.value })}
+                placeholder="Payment due in 30 days..."
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Select Bank Account (for PDF)</Label>
+              <Select value={formData.bankAccountId} onValueChange={(val) => setFormData({ ...formData, bankAccountId: val })}>
+                <SelectTrigger><SelectValue placeholder="Select Bank Account" /></SelectTrigger>
+                <SelectContent>
+                  {invoiceSettings.bankAccounts?.map((acc: any, i: number) => (
+                    <SelectItem key={i} value={acc._id || acc.accountNumber}>
+                      {acc.bankName} - {acc.accountNumber} {acc.isDefault ? '(Default)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Actions */}
+        <div className="flex justify-end gap-4 mt-8">
           <Button variant="outline" onClick={() => router.back()}>
             Cancel
           </Button>
@@ -714,6 +1131,124 @@ export default function NewInvoicePage() {
           </Button>
         </div>
       </form>
+
+      {/* Product Creation Dialog */}
+      <Dialog open={isProductDialogOpen} onOpenChange={setIsProductDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto w-full">
+          <DialogHeader>
+            <DialogTitle>Add New Product</DialogTitle>
+            <DialogDescription>Add a product to your catalog and invoice immediately.</DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleProductSubmit(onProductSubmit)} className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Left Column */}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Product Name *</Label>
+                  <Input {...registerProduct('name')} placeholder="Product Name" />
+                  {productErrors.name && <p className="text-red-500 text-xs">{productErrors.name.message}</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>SKU *</Label>
+                  <div className="flex gap-2">
+                    <Input {...registerProduct('sku')} placeholder="SKU" />
+                    <Button type="button" variant="outline" size="icon" onClick={generateSku} title="Generate SKU">
+                      <RefreshCw className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  {productErrors.sku && <p className="text-red-500 text-xs">{productErrors.sku.message}</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Textarea {...registerProduct('description')} placeholder="Description" />
+                </div>
+
+                <div className="flex items-center space-x-2 border p-3 rounded-md">
+                  <Switch id="np_service" checked={isService} onCheckedChange={(c) => setValueProduct('isService', c)} />
+                  <Label htmlFor="np_service">Is Service?</Label>
+                </div>
+              </div>
+
+              {/* Right Column */}
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Selling Price (Incl. GST) *</Label>
+                    <Input type="number" step="0.01" {...registerProduct('sellingPrice')} />
+                    {productErrors.sellingPrice && <p className="text-red-500 text-xs">{productErrors.sellingPrice.message}</p>}
+                    {watchProduct('sellingPrice') > 0 && (
+                      <p className="text-[10px] text-blue-600 font-medium mt-1">
+                        Excl. GST: ₹{(watchProduct('sellingPrice') / (1 + (watchProduct('taxRate') / 100))).toFixed(2)}
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Cost Price</Label>
+                    <Input type="number" step="0.01" {...registerProduct('costPrice')} />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>GST Rate (%)</Label>
+                    <Select value={watchProduct('taxRate')?.toString()} onValueChange={(val) => setValueProduct('taxRate', Number(val))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0">0%</SelectItem>
+                        <SelectItem value="5">5%</SelectItem>
+                        <SelectItem value="12">12%</SelectItem>
+                        <SelectItem value="18">18%</SelectItem>
+                        <SelectItem value="28">28%</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Tax Preference</Label>
+                    <Select value={watchProduct('gstType')} onValueChange={(val: any) => setValueProduct('gstType', val)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cgst_sgst">Taxable (Intra-state)</SelectItem>
+                        <SelectItem value="igst">Taxable (Inter-state)</SelectItem>
+                        <SelectItem value="exempt">Tax Exempt</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>HSN/SAC</Label>
+                    <Input {...registerProduct('hsnCode')} placeholder={isService ? "SAC" : "HSN"} />
+                  </div>
+                </div>
+
+                {!isService && (
+                  <div className="space-y-2 border p-3 rounded-md">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <Switch checked={watchProduct('trackInventory')} onCheckedChange={(c) => setValueProduct('trackInventory', c)} />
+                      <Label>Track Inventory</Label>
+                    </div>
+                    {watchProduct('trackInventory') && (
+                      <div className="space-y-2">
+                        <Label>Reorder Point</Label>
+                        <Input type="number" {...registerProduct('reorderPoint')} />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsProductDialogOpen(false)}>Cancel</Button>
+              <Button type="submit" disabled={isCreatingProduct}>
+                {isCreatingProduct && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                Create Product
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -120,28 +120,44 @@ export default function NewProductPage() {
     }
   };
 
-  // Calculate margin whenever price changes
+  // Calculate margin and unit price whenever prices change
+  const [unitPrice, setUnitPrice] = useState<number>(0);
+  const taxRate = watch('taxRate');
+
   useEffect(() => {
     if (sellingPrice && sellingPrice > 0) {
+      // Calculate unit price (excluding GST) from selling price (including GST)
+      const basePrice = sellingPrice / (1 + (taxRate / 100));
+      setUnitPrice(parseFloat(basePrice.toFixed(2)));
+
       const cp = costPrice || 0;
-      const calculatedMargin = ((sellingPrice - cp) / sellingPrice) * 100;
+      // Margin calculation based on base price vs cost price
+      const calculatedMargin = basePrice > 0 ? ((basePrice - cp) / basePrice) * 100 : 0;
       setMargin(parseFloat(calculatedMargin.toFixed(2)));
     } else {
+      setUnitPrice(0);
       setMargin(null);
     }
-  }, [costPrice, sellingPrice]);
+  }, [costPrice, sellingPrice, taxRate]);
 
   const onSubmit = async (data: ProductFormData) => {
     setIsLoading(true);
 
     try {
+      // Send unit price (excluding GST) to backend as the 'sellingPrice' 
+      // since invoices usually calculate tax ON TOP of this stored price.
+      const basePrice = data.sellingPrice / (1 + (data.taxRate / 100));
+
       const res = await fetch('/api/products', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify(data)
+        body: JSON.stringify({
+          ...data,
+          sellingPrice: parseFloat(basePrice.toFixed(2)) // Store price EXCLUDING GST
+        })
       });
 
       const result = await res.json();
@@ -291,7 +307,7 @@ export default function NewProductPage() {
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <Label htmlFor="sellingPrice">Selling Price (₹) <span className="text-destructive">*</span></Label>
+                    <Label htmlFor="sellingPrice">Selling Price (Incl. GST) (₹) <span className="text-destructive">*</span></Label>
                     <div className="relative">
                       <span className="absolute left-3 top-2.5 text-muted-foreground">₹</span>
                       <Input
@@ -305,6 +321,11 @@ export default function NewProductPage() {
                       />
                     </div>
                     {errors.sellingPrice && <p className="text-xs text-destructive">{errors.sellingPrice.message}</p>}
+                    {sellingPrice > 0 && (
+                      <p className="text-xs text-primary font-medium">
+                        Unit Price (Excl. GST): ₹{unitPrice}
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">

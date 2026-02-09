@@ -1,32 +1,4 @@
-// LedgerEntry is not yet exported from /lib/models, defining interface here
-class LedgerEntry {
-  _id?: string;
-  tenantId: string;
-  entryType: 'debit' | 'credit';
-  accountCode: string;
-  accountName: string;
-  amount: number;
-  referenceType: string;
-  referenceId: string;
-  description?: string;
-  createdByUserId?: string;
-  createdAt?: Date;
-
-  constructor(entry: any) {
-    this._id = entry._id;
-    this.tenantId = entry.tenantId;
-    this.entryType = entry.entryType;
-    this.accountCode = entry.accountCode;
-    this.accountName = entry.accountName;
-    this.amount = entry.amount;
-    this.referenceType = entry.referenceType;
-    this.referenceId = entry.referenceId;
-    this.description = entry.description;
-    this.createdByUserId = entry.createdByUserId;
-    this.createdAt = entry.createdAt;
-  }
-}
-
+import { LedgerEntry, connectDB } from '@/lib/models';
 import { Types } from 'mongoose';
 
 // ============================================================================
@@ -39,24 +11,24 @@ const CHART_OF_ACCOUNTS = {
   '1010': { name: 'Bank Accounts', type: 'asset', debitIncrease: true },
   '1100': { name: 'Accounts Receivable', type: 'asset', debitIncrease: true },
   '1200': { name: 'Inventory', type: 'asset', debitIncrease: true },
-  
+
   // LIABILITIES
   '2000': { name: 'Accounts Payable', type: 'liability', debitIncrease: false },
   '2100': { name: 'GST Payable (CGST)', type: 'liability', debitIncrease: false },
   '2110': { name: 'GST Payable (SGST)', type: 'liability', debitIncrease: false },
   '2120': { name: 'GST Payable (IGST)', type: 'liability', debitIncrease: false },
   '2200': { name: 'Tax Deducted at Source', type: 'liability', debitIncrease: false },
-  
+
   // EQUITY
   '3000': { name: 'Capital', type: 'equity', debitIncrease: false },
   '3100': { name: 'Retained Earnings', type: 'equity', debitIncrease: false },
-  
+
   // REVENUE
   '4000': { name: 'Sales - Local (GST)', type: 'revenue', debitIncrease: false },
   '4100': { name: 'Sales - Interstate (GST)', type: 'revenue', debitIncrease: false },
   '4200': { name: 'Sales - Export', type: 'revenue', debitIncrease: false },
   '4300': { name: 'Sales - SEZ', type: 'revenue', debitIncrease: false },
-  
+
   // EXPENSES
   '5000': { name: 'Cost of Goods Sold', type: 'expense', debitIncrease: true },
   '5100': { name: 'Purchase - Local', type: 'expense', debitIncrease: true },
@@ -64,7 +36,7 @@ const CHART_OF_ACCOUNTS = {
   '5300': { name: 'Purchase - Import', type: 'expense', debitIncrease: true },
   '5400': { name: 'Freight & Forwarding', type: 'expense', debitIncrease: true },
   '5500': { name: 'Returns & Adjustments', type: 'expense', debitIncrease: true },
-  
+
   // INPUT TAX CREDIT
   '6000': { name: 'Input Tax Credit (CGST)', type: 'asset', debitIncrease: true },
   '6100': { name: 'Input Tax Credit (SGST)', type: 'asset', debitIncrease: true },
@@ -100,7 +72,7 @@ export async function createLedgerEntry(entry: LedgerEntryInput): Promise<void> 
     description: entry.description,
     createdByUserId: entry.createdByUserId,
   });
-  
+
   await newEntry.save();
 }
 
@@ -132,11 +104,11 @@ export async function postInvoiceToGL(
     tenantId,
     createdByUserId,
   });
-  
+
   // Credit: Sales account (varies by transaction type)
   const saleAmount = totalAmount - cgstAmount - sgstAmount - igstAmount;
   let saleAccountCode = '4000';
-  
+
   if (isExport) {
     saleAccountCode = '4200';
   } else if (igstAmount > 0) {
@@ -144,7 +116,7 @@ export async function postInvoiceToGL(
   } else {
     saleAccountCode = '4000'; // Local
   }
-  
+
   await createLedgerEntry({
     entryType: 'credit',
     accountCode: saleAccountCode,
@@ -156,7 +128,7 @@ export async function postInvoiceToGL(
     tenantId,
     createdByUserId,
   });
-  
+
   // Credit: GST Payable (if applicable)
   if (cgstAmount > 0) {
     await createLedgerEntry({
@@ -171,7 +143,7 @@ export async function postInvoiceToGL(
       createdByUserId,
     });
   }
-  
+
   if (sgstAmount > 0) {
     await createLedgerEntry({
       entryType: 'credit',
@@ -185,7 +157,7 @@ export async function postInvoiceToGL(
       createdByUserId,
     });
   }
-  
+
   if (igstAmount > 0) {
     await createLedgerEntry({
       entryType: 'credit',
@@ -218,7 +190,7 @@ export async function postPaymentToGL(
   if (paymentMethod === 'bank_transfer' || paymentMethod === 'cheque') {
     bankAccountCode = '1010'; // Bank account
   }
-  
+
   // Debit: Bank/Cash
   await createLedgerEntry({
     entryType: 'debit',
@@ -231,7 +203,7 @@ export async function postPaymentToGL(
     tenantId,
     createdByUserId,
   });
-  
+
   // Credit: Accounts Receivable
   await createLedgerEntry({
     entryType: 'credit',
@@ -261,7 +233,7 @@ export async function postStockMovementToGL(
   createdByUserId: string
 ): Promise<void> {
   const totalValue = quantity * unitCost;
-  
+
   if (entryType === 'inward') {
     // Purchase: Debit Inventory, Credit AP or Expense
     await createLedgerEntry({
@@ -288,7 +260,7 @@ export async function postStockMovementToGL(
       tenantId,
       createdByUserId,
     });
-    
+
     await createLedgerEntry({
       entryType: 'credit',
       accountCode: '1200',
@@ -325,19 +297,19 @@ export async function generateTrialBalance(
   isBalanced: boolean;
 }> {
   const query: any = { tenantId };
-  
+
   if (fromDate || toDate) {
     query.createdAt = {};
     if (fromDate) query.createdAt.$gte = fromDate;
     if (toDate) query.createdAt.$lte = toDate;
   }
-  
+
   const entries = await LedgerEntry.find(query).lean();
-  
+
   const accountBalances: Record<string, any> = {};
   let totalDebits = 0;
   let totalCredits = 0;
-  
+
   for (const entry of entries) {
     if (!accountBalances[entry.accountCode]) {
       accountBalances[entry.accountCode] = {
@@ -347,7 +319,7 @@ export async function generateTrialBalance(
         creditAmount: 0,
       };
     }
-    
+
     if (entry.entryType === 'debit') {
       accountBalances[entry.accountCode].debitAmount += entry.amount;
       totalDebits += entry.amount;
@@ -356,7 +328,7 @@ export async function generateTrialBalance(
       totalCredits += entry.amount;
     }
   }
-  
+
   // Calculate balance for each account
   const accounts = Object.values(accountBalances).map((acc: any) => {
     const balance = acc.debitAmount - acc.creditAmount;
@@ -366,7 +338,7 @@ export async function generateTrialBalance(
       balanceType: balance >= 0 ? 'debit' : 'credit',
     };
   });
-  
+
   return {
     totalDebits,
     totalCredits,
@@ -398,17 +370,17 @@ export async function generateIncomeStatement(
     tenantId,
     createdAt: { $gte: fromDate, $lte: toDate },
   };
-  
+
   const entries = await LedgerEntry.find(query).lean();
-  
+
   const revenueAccounts = ['4000', '4100', '4200', '4300'];
   const expenseAccounts = ['5000', '5100', '5200', '5300', '5400', '5500'];
-  
+
   let totalRevenue = 0;
   let totalExpenses = 0;
   const revenueItems: any[] = [];
   const expenseItems: any[] = [];
-  
+
   for (const entry of entries) {
     if (revenueAccounts.includes(entry.accountCode)) {
       const amount = entry.entryType === 'credit' ? entry.amount : -entry.amount;
@@ -428,9 +400,9 @@ export async function generateIncomeStatement(
       });
     }
   }
-  
+
   const grossProfit = totalRevenue - totalExpenses;
-  
+
   return {
     revenue: totalRevenue,
     costOfGoodsSold: totalExpenses,
@@ -466,25 +438,25 @@ export async function generateBalanceSheet(
     tenantId,
     createdAt: { $lte: asOfDate },
   };
-  
+
   const trialBalance = await generateTrialBalance(tenantId, undefined, asOfDate);
-  
+
   const assetAccounts = trialBalance.accounts.filter(acc =>
     ['1000', '1010', '1100', '1200', '6000', '6100', '6200'].includes(acc.accountCode)
   );
-  
+
   const liabilityAccounts = trialBalance.accounts.filter(acc =>
     ['2000', '2100', '2110', '2120', '2200'].includes(acc.accountCode)
   );
-  
+
   const equityAccounts = trialBalance.accounts.filter(acc =>
     ['3000', '3100'].includes(acc.accountCode)
   );
-  
+
   const totalAssets = assetAccounts.reduce((sum, acc) => sum + acc.balance, 0);
   const totalLiabilities = liabilityAccounts.reduce((sum, acc) => sum + acc.balance, 0);
   const totalEquity = equityAccounts.reduce((sum, acc) => sum + acc.balance, 0);
-  
+
   return {
     assets: {
       current: assetAccounts,

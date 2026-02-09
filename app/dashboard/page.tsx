@@ -20,28 +20,63 @@ import {
 } from 'recharts';
 import { useRouter } from 'next/navigation';
 import { CheckCircle } from 'lucide-react';
-
-// Empty data - will be populated from API
-const monthlyData = [];
-const taxBreakdown = [];
-const recentInvoices = [];
-const stats = [
-  { label: 'Total Invoices', value: '0', change: '0%', color: 'blue' },
-  { label: 'Monthly Revenue', value: '₹0', change: '0%', color: 'green' },
-  { label: 'Tax Collected', value: '₹0', change: '0%', color: 'orange' },
-  { label: 'Pending Payments', value: '₹0', change: '0%', color: 'red' },
-];
+import { useState, useEffect } from 'react';
 
 const statusBgColor: Record<string, string> = {
   paid: 'bg-green-100 text-green-800',
   pending: 'bg-yellow-100 text-yellow-800',
   draft: 'bg-gray-100 text-gray-800',
   cancelled: 'bg-red-100 text-red-800',
+  issued: 'bg-blue-100 text-blue-800',
+  partially_paid: 'bg-orange-100 text-orange-800',
 };
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { tenant } = useAuth();
+  const { tenant, token } = useAuth();
+
+  const [stats, setStats] = useState([
+    { label: 'Total Invoices', value: '0', change: '0%', color: 'blue' },
+    { label: 'Monthly Revenue', value: '₹0', change: '0%', color: 'green' },
+    { label: 'Tax Collected', value: '₹0', change: '0%', color: 'orange' },
+    { label: 'Pending Payments', value: '₹0', change: '0%', color: 'red' },
+  ]);
+
+  const [monthlyData, setMonthlyData] = useState<any[]>([]);
+  const [taxBreakdown, setTaxBreakdown] = useState<any[]>([]);
+  const [recentInvoices, setRecentInvoices] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!token) return;
+
+    const fetchDashboardData = async () => {
+      try {
+        const response = await fetch('/api/dashboard/stats', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success) {
+            setStats(result.data.stats);
+            setMonthlyData(result.data.monthlyData);
+            setTaxBreakdown(result.data.taxBreakdown);
+            setRecentInvoices(result.data.recentInvoices);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [token]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
@@ -76,7 +111,7 @@ export default function DashboardPage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Revenue & Tax Trend</CardTitle>
-            <CardDescription>Monthly invoiced amount and tax collected</CardDescription>
+            <CardDescription>Monthly invoiced amount and tax collected (Last 6 Months)</CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
@@ -84,7 +119,7 @@ export default function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis />
-                <Tooltip formatter={(value) => `₹${value}`} />
+                <Tooltip formatter={(value) => `₹${Number(value).toLocaleString('en-IN')}`} />
                 <Legend />
                 <Line
                   type="monotone"
@@ -107,7 +142,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>Tax Breakdown</CardTitle>
-            <CardDescription>CGST vs SGST vs IGST</CardDescription>
+            <CardDescription>All Time CGST vs SGST vs IGST</CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
@@ -117,7 +152,7 @@ export default function DashboardPage() {
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, value }) => `${name}: ₹${value}`}
+                  label={({ name, value }) => `${name}`}
                   outerRadius={80}
                   fill="#8884d8"
                   dataKey="value"
@@ -126,7 +161,7 @@ export default function DashboardPage() {
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value) => `₹${value}`} />
+                <Tooltip formatter={(value) => `₹${Number(value).toLocaleString('en-IN')}`} />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>
@@ -158,7 +193,7 @@ export default function DashboardPage() {
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <div>
               <CardTitle>Recent Invoices</CardTitle>
-              <CardDescription>Last 4 invoices created</CardDescription>
+              <CardDescription>Last 5 invoices created</CardDescription>
             </div>
             <Button
               variant="outline"
@@ -170,27 +205,31 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {recentInvoices.map((invoice) => (
-                <div
-                  key={invoice.id}
-                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-slate-50 transition"
-                >
-                  <div className="flex-1">
-                    <p className="font-semibold text-slate-900">{invoice.number}</p>
-                    <p className="text-sm text-slate-600">{invoice.customer}</p>
+              {recentInvoices.length > 0 ? (
+                recentInvoices.map((invoice) => (
+                  <div
+                    key={invoice.id}
+                    className="flex items-center justify-between p-3 border rounded-lg hover:bg-slate-50 transition"
+                  >
+                    <div className="flex-1">
+                      <p className="font-semibold text-slate-900">{invoice.number}</p>
+                      <p className="text-sm text-slate-600">{invoice.customer}</p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <p className="font-mono font-semibold text-slate-900">
+                        ₹{invoice.amount.toLocaleString('en-IN')}
+                      </p>
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-semibold ${statusBgColor[invoice.status as keyof typeof statusBgColor] || 'bg-gray-100 text-gray-800'}`}
+                      >
+                        {invoice.status}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <p className="font-mono font-semibold text-slate-900">
-                      ₹{invoice.amount.toLocaleString('en-IN')}
-                    </p>
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-semibold ${statusBgColor[invoice.status as keyof typeof statusBgColor]}`}
-                    >
-                      {invoice.status}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p className="text-center text-slate-500 py-4">No recent invoices found</p>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -6,7 +6,6 @@ import useSWR from 'swr';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { Plus, Search, Filter, Download } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -23,6 +22,20 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
+import { Plus, Search, Filter, Download, Trash2, Receipt } from 'lucide-react';
+
 
 const fetcher = (url: string, token: string) =>
   fetch(url, {
@@ -35,13 +48,119 @@ export default function InvoicesPage() {
   const [limit] = useState(50);
   const [offset, setOffset] = useState(0);
 
-  const { data, isLoading, error } = useSWR(
+  // Payment Recording States
+  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [paymentData, setPaymentData] = useState({
+    amount: 0,
+    date: new Date().toISOString().split('T')[0],
+    method: 'upi',
+    bankName: '',
+    paymentReferenceId: '',
+    notes: ''
+  });
+
+  const { data: settingsData } = useSWR(
+    token ? ['/api/settings', token] : null,
+    ([url, t]) => fetcher(url, t)
+  );
+
+  const bankAccounts = settingsData?.data?.bankAccounts || [];
+
+  const { data, isLoading, error, mutate } = useSWR(
     token ? [
       `/api/invoices?limit=${limit}&offset=${offset}${status && status !== 'all_status' ? `&status=${status}` : ''}`,
       token
     ] : null,
     ([url, token]) => fetcher(url, token)
   );
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this invoice?')) return;
+    if (!token) return;
+
+    try {
+      const res = await fetch(`/api/invoices/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        toast.error(err.error || 'Failed to delete invoice');
+        return;
+      }
+
+      toast.success('Invoice deleted successfully');
+      mutate(); // Refresh the list
+    } catch (error) {
+      console.error('Delete error', error);
+      toast.error('Failed to delete invoice');
+    }
+  };
+
+  const handleRecordPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token || !selectedInvoice) return;
+
+    if (paymentData.amount <= 0) {
+      toast.error('Payment amount must be greater than zero');
+      return;
+    }
+
+    const pendingAmount = selectedInvoice.totalAmount - (selectedInvoice.paidAmount || 0);
+    if (paymentData.amount > pendingAmount + 1) { // Allowing minor rounding diff
+      toast.error(`Payment amount ₹${paymentData.amount} exceeds pending amount ₹${pendingAmount}`);
+      return;
+    }
+
+    setIsSubmittingPayment(true);
+    try {
+      const res = await fetch('/api/payments/record', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          invoiceId: selectedInvoice._id,
+          paymentAmount: paymentData.amount,
+          paymentMethod: paymentData.method,
+          paymentDate: paymentData.date,
+          bankName: paymentData.bankName,
+          paymentReferenceId: paymentData.paymentReferenceId,
+          notes: paymentData.notes
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to record payment');
+
+      toast.success('Payment recorded successfully');
+      setIsPaymentDialogOpen(false);
+      mutate(); // Refresh invoice list
+    } catch (error: any) {
+      console.error('Payment recording error', error);
+      toast.error(error.message);
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
+  const openPaymentDialog = (invoice: any) => {
+    setSelectedInvoice(invoice);
+    const pending = invoice.totalAmount - (invoice.paidAmount || 0);
+    setPaymentData({
+      amount: pending,
+      date: new Date().toISOString().split('T')[0],
+      method: 'upi',
+      bankName: bankAccounts.find((b: any) => b.isDefault)?.bankName || bankAccounts[0]?.bankName || '',
+      paymentReferenceId: '',
+      notes: ''
+    });
+    setIsPaymentDialogOpen(true);
+  };
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -181,22 +300,157 @@ export default function InvoicesPage() {
                       <TableCell>
                         <div className="flex gap-1">
                           <Link href={`/dashboard/invoices/${invoice._id}`}>
-                            <Button variant="ghost" size="sm">
+                            <Button variant="ghost" size="sm" title="View Details">
                               View
                             </Button>
                           </Link>
+                          {invoice.status !== 'paid' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-green-600 hover:text-green-700 hover:bg-green-50 gap-1"
+                              onClick={() => openPaymentDialog(invoice)}
+                              title="Record Payment"
+                            >
+                              <Receipt className="w-4 h-4" />
+                              Pay
+                            </Button>
+                          )}
                           <Link href={`/api/invoices/${invoice._id}/pdf?token=${token}`} target="_blank">
-                            <Button variant="ghost" size="sm" className="gap-1">
+                            <Button variant="ghost" size="sm" className="gap-1" title="Download PDF">
                               <Download className="w-4 h-4" />
-                              PDF
                             </Button>
                           </Link>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => handleDelete(invoice._id)}
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+
+              {/* Payment Dialog */}
+              <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Record Payment</DialogTitle>
+                    <DialogDescription>
+                      Recording payment for Invoice {selectedInvoice?.invoiceNumber}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleRecordPayment} className="space-y-4 pt-4">
+                    <div className="grid grid-cols-2 gap-4 text-sm p-3 bg-slate-50 rounded-lg border">
+                      <div>
+                        <p className="text-slate-500">Total Amount</p>
+                        <p className="font-bold text-slate-900">₹{selectedInvoice?.totalAmount.toLocaleString('en-IN')}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-slate-500">Amount Pending</p>
+                        <p className="font-bold text-red-600">₹{(selectedInvoice?.totalAmount - (selectedInvoice?.paidAmount || 0)).toLocaleString('en-IN')}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Amount to be Recorded (₹)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={paymentData.amount}
+                        onChange={e => setPaymentData({ ...paymentData, amount: parseFloat(e.target.value) || 0 })}
+                        required
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Payment Date</Label>
+                        <Input
+                          type="date"
+                          value={paymentData.date}
+                          onChange={e => setPaymentData({ ...paymentData, date: e.target.value })}
+                          required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Payment Type</Label>
+                        <Select
+                          value={paymentData.method}
+                          onValueChange={val => setPaymentData({ ...paymentData, method: val })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="upi">UPI</SelectItem>
+                            <SelectItem value="cash">Cash</SelectItem>
+                            <SelectItem value="card">Card</SelectItem>
+                            <SelectItem value="net_banking">Net Banking</SelectItem>
+                            <SelectItem value="cheque">Cheque</SelectItem>
+                            <SelectItem value="emi">EMI</SelectItem>
+                            <SelectItem value="tds">TDS</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Bank</Label>
+                      <Select
+                        value={paymentData.bankName}
+                        onValueChange={val => setPaymentData({ ...paymentData, bankName: val })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select bank" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {bankAccounts.length > 0 ? (
+                            bankAccounts.map((acc: any, i: number) => (
+                              <SelectItem key={i} value={acc.bankName}>
+                                {acc.bankName} ({acc.accountNumber.slice(-4)})
+                              </SelectItem>
+                            ))
+                          ) : (
+                            <SelectItem value="None">No bank accounts in settings</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Payment Reference ID (Optional)</Label>
+                      <Input
+                        placeholder="A unique ID for each payment"
+                        value={paymentData.paymentReferenceId}
+                        onChange={e => setPaymentData({ ...paymentData, paymentReferenceId: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>More Details (Optional)</Label>
+                      <Textarea
+                        placeholder="Notes about this payment..."
+                        value={paymentData.notes}
+                        onChange={e => setPaymentData({ ...paymentData, notes: e.target.value })}
+                      />
+                    </div>
+
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setIsPaymentDialogOpen(false)}>Cancel</Button>
+                      <Button type="submit" disabled={isSubmittingPayment}>
+                        {isSubmittingPayment ? 'Recording...' : 'Record Payment'}
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </DialogContent>
+              </Dialog>
             </div>
           ) : (
             <div className="text-center py-12">

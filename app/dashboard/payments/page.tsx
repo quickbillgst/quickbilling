@@ -28,64 +28,16 @@ import {
 } from '@/components/ui/alert-dialog';
 import { CreditCard, TrendingUp, AlertCircle, CheckCircle, Clock, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import useSWR from 'swr';
+import Link from 'next/link';
 
-// Mock payment data
-const mockPayments = [
-  {
-    id: 'pay_001',
-    invoiceNumber: 'INV-00124',
-    customer: 'ABC Traders',
-    amount: 45000,
-    status: 'completed',
-    method: 'bank_transfer',
-    date: '2024-02-03',
-    reference: 'NEFT-001',
-  },
-  {
-    id: 'pay_002',
-    invoiceNumber: 'INV-00123',
-    customer: 'XYZ Manufacturing',
-    amount: 31000,
-    status: 'pending',
-    method: 'upi',
-    date: '2024-02-02',
-    reference: 'UPI-00456789',
-  },
-  {
-    id: 'pay_003',
-    invoiceNumber: 'INV-00122',
-    customer: 'Local Retailer',
-    amount: 28000,
-    status: 'completed',
-    method: 'cash',
-    date: '2024-02-01',
-    reference: 'CASH-001',
-  },
-  {
-    id: 'pay_004',
-    invoiceNumber: 'INV-00121',
-    customer: 'DEF Services',
-    amount: 18500,
-    status: 'completed',
-    method: 'card',
-    date: '2024-01-31',
-    reference: 'CARD-9876',
-  },
-  {
-    id: 'pay_005',
-    invoiceNumber: 'INV-00120',
-    customer: 'GHI Traders',
-    amount: 55000,
-    status: 'pending',
-    method: 'cheque',
-    date: '2024-01-30',
-    reference: 'CHQ-5678',
-  },
-];
+const fetcher = (url: string, token: string) =>
+  fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  }).then((res) => res.json());
 
 export default function PaymentsPage() {
   const { token } = useAuth();
-  const [showForm, setShowForm] = useState(false);
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteDialog, setDeleteDialog] = useState<{
@@ -95,30 +47,44 @@ export default function PaymentsPage() {
   }>({ open: false });
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Fetch real payments
+  const { data, isLoading, mutate } = useSWR(
+    token ? [`/api/payments/list?limit=100&status=${filterStatus}&search=${searchTerm}`, token] : null,
+    ([url, t]) => fetcher(url, t)
+  );
+
+  const payments = data?.data || [];
+
+  const totalCollected = payments
+    .filter((p: any) => p.status === 'completed')
+    .reduce((sum: number, p: any) => sum + (p.paymentAmount || 0), 0);
+
+  const pendingCount = payments.filter((p: any) => p.status === 'pending').length;
+
   const stats = [
     {
       label: 'Total Collected',
-      value: '₹1,46,500',
+      value: `₹${totalCollected.toLocaleString('en-IN')}`,
       icon: CreditCard,
       color: 'text-green-600',
     },
     {
-      label: 'Pending Payments',
-      value: '₹86,000',
+      label: 'Pending Tracking',
+      value: pendingCount.toString(),
       icon: Clock,
       color: 'text-orange-600',
     },
     {
-      label: 'Success Rate',
-      value: '98.5%',
+      label: 'Avg Payment',
+      value: `₹${payments.length ? (totalCollected / payments.length).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '0'}`,
       icon: TrendingUp,
       color: 'text-blue-600',
     },
     {
-      label: 'Failed Payments',
-      value: '0',
-      icon: AlertCircle,
-      color: 'text-red-600',
+      label: 'Total Records',
+      value: payments.length.toString(),
+      icon: CheckCircle,
+      color: 'text-indigo-600',
     },
   ];
 
@@ -138,27 +104,25 @@ export default function PaymentsPage() {
   const getMethodIcon = (method: string) => {
     const icons: Record<string, string> = {
       bank_transfer: '🏦',
+      net_banking: '💻',
       upi: '📱',
       cash: '💵',
       card: '💳',
       cheque: '🧾',
+      emi: '🕒',
+      tds: '🏛️'
     };
     return icons[method] || '💰';
   };
 
-  const filtered = mockPayments.filter((payment) => {
-    const matchStatus = filterStatus === 'all' || payment.status === filterStatus;
-    const matchSearch =
-      searchTerm === '' ||
-      payment.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      payment.customer.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchStatus && matchSearch;
-  });
+  // Filtered logic moved to SWR URL params where possible, 
+  // but we can still do local filtering for immediate feedback if needed.
+  // const filtered = payments; 
 
   const handleRecordPayment = (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success('Payment recorded successfully!');
-    setShowForm(false);
+    // Integrated in Invoices page as per requirement, but this form could be reactive too
+    toast.info('Please record payments directly from the Invoices page.');
   };
 
   const handleDeletePayment = async () => {
@@ -183,10 +147,7 @@ export default function PaymentsPage() {
         throw new Error(error.details || error.error || 'Failed to delete payment');
       }
 
-      toast.success(`Payment ${deleteDialog.invoiceNumber} deleted successfully`);
-      setDeleteDialog({ open: false });
-      // Refresh page data
-      window.location.reload();
+      mutate();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to delete payment';
       toast.error(message);
@@ -204,13 +165,12 @@ export default function PaymentsPage() {
             Track and manage customer payments and reconciliation
           </p>
         </div>
-        <Button
-          onClick={() => setShowForm(!showForm)}
-          className="gap-2"
-        >
-          <CreditCard className="w-5 h-5" />
-          Record Payment
-        </Button>
+        <Link href="/dashboard/invoices">
+          <Button className="gap-2">
+            <CreditCard className="w-5 h-5" />
+            Record Payment
+          </Button>
+        </Link>
       </div>
 
       {/* Stats */}
@@ -233,84 +193,7 @@ export default function PaymentsPage() {
         })}
       </div>
 
-      {/* Record Payment Form */}
-      {showForm && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Record New Payment</CardTitle>
-            <CardDescription>Add a payment against an invoice</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleRecordPayment} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Invoice Number</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select invoice" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {mockPayments.map((p) => (
-                        <SelectItem
-                          key={p.id}
-                          value={p.invoiceNumber}
-                        >
-                          {p.invoiceNumber} - {p.customer}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Amount</Label>
-                  <Input type="number" placeholder="0.00" min="0" />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Payment Method</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select method" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                      <SelectItem value="upi">UPI</SelectItem>
-                      <SelectItem value="cash">Cash</SelectItem>
-                      <SelectItem value="card">Card</SelectItem>
-                      <SelectItem value="cheque">Cheque</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Payment Date</Label>
-                  <Input type="date" />
-                </div>
-
-                <div className="space-y-2 md:col-span-2">
-                  <Label>Reference Number</Label>
-                  <Input
-                    placeholder="NEFT/UPI/Cheque reference"
-                    type="text"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2 justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowForm(false)}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit">Record Payment</Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
+      {/* Form removed as it's now in Invoices dialog, but keep space if needed */}
 
       {/* Payments Table */}
       <Card>
@@ -356,24 +239,27 @@ export default function PaymentsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.length > 0 ? (
-                  filtered.map((payment) => (
-                    <TableRow key={payment.id}>
+                {payments.length > 0 ? (
+                  payments.map((payment: any) => (
+                    <TableRow key={payment._id}>
                       <TableCell className="font-mono font-semibold">
-                        {payment.invoiceNumber}
+                        {payment.invoiceId?.invoiceNumber || 'N/A'}
                       </TableCell>
-                      <TableCell>{payment.customer}</TableCell>
+                      <TableCell>{payment.invoiceId?.customerId?.name || 'N/A'}</TableCell>
                       <TableCell className="text-right font-mono">
-                        ₹{payment.amount.toLocaleString('en-IN')}
+                        ₹{payment.paymentAmount?.toLocaleString('en-IN')}
                       </TableCell>
                       <TableCell>
-                        {getMethodIcon(payment.method)} {payment.method}
+                        <span className="flex items-center gap-1">
+                          <span>{getMethodIcon(payment.paymentMethod)}</span>
+                          <span className="capitalize">{payment.paymentMethod?.replace('_', ' ')}</span>
+                        </span>
                       </TableCell>
-                      <TableCell className="font-mono text-sm">
-                        {payment.reference}
+                      <TableCell className="font-mono text-xs max-w-[120px] truncate">
+                        {payment.paymentReferenceId || '-'}
                       </TableCell>
                       <TableCell className="text-sm text-slate-600">
-                        {payment.date}
+                        {payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
                       </TableCell>
                       <TableCell>
                         <span
@@ -398,8 +284,8 @@ export default function PaymentsPage() {
                           onClick={() =>
                             setDeleteDialog({
                               open: true,
-                              paymentId: payment.id,
-                              invoiceNumber: payment.invoiceNumber,
+                              paymentId: payment._id,
+                              invoiceNumber: payment.invoiceId?.invoiceNumber,
                             })
                           }
                         >
@@ -411,7 +297,7 @@ export default function PaymentsPage() {
                 ) : (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center py-8 text-slate-500">
-                      No payments found matching your criteria
+                      {isLoading ? 'Loading payments...' : 'No payments found matching your criteria'}
                     </TableCell>
                   </TableRow>
                 )}

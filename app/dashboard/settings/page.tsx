@@ -7,7 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Lock, Bell, User, CreditCard, FileText, AlertCircle, CheckCircle, Loader2, Upload, Trash2, ImageIcon } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Settings, Lock, Bell, User, CreditCard, FileText, AlertCircle, CheckCircle, Loader2, Upload, Trash2, ImageIcon, Plus } from 'lucide-react';
+
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
 
@@ -81,7 +83,18 @@ export default function SettingsPage() {
       accountNumber: '',
       ifscCode: '',
       branchName: ''
-    }
+    },
+    bankAccounts: [] as Array<{
+      accountName: string,
+      accountNumber: string,
+      bankName: string,
+      ifscCode: string,
+      branchName: string,
+      isDefault: boolean
+    }>,
+    // New multi-series support
+    gstInvoiceSeries: [] as Array<{ prefix: string; nextNumber: number }>,
+    nonGstInvoiceSeries: [] as Array<{ prefix: string; nextNumber: number }>
   });
 
   // User Profile State
@@ -160,6 +173,8 @@ export default function SettingsPage() {
           nextInvoiceNumber: data.nextInvoiceNumber || 1,
           nonGstInvoicePrefix: data.nonGstInvoicePrefix || 'BILL-',
           nextNonGstInvoiceNumber: data.nextNonGstInvoiceNumber || 1,
+          gstInvoiceSeries: data.gstInvoiceSeries || [],
+          nonGstInvoiceSeries: data.nonGstInvoiceSeries || [],
           address: {
             line1: data.address?.line1 || '',
             city: data.address?.city || '',
@@ -172,7 +187,17 @@ export default function SettingsPage() {
             accountNumber: data.bankDetails?.accountNumber || '',
             ifscCode: data.bankDetails?.ifscCode || '',
             branchName: data.bankDetails?.branchName || ''
-          }
+          },
+          bankAccounts: data.bankAccounts && data.bankAccounts.length > 0
+            ? data.bankAccounts
+            : (data.bankDetails?.accountNumber ? [{
+              bankName: data.bankDetails.bankName || '',
+              accountName: data.bankDetails.accountName || '',
+              accountNumber: data.bankDetails.accountNumber || '',
+              ifscCode: data.bankDetails.ifscCode || '',
+              branchName: data.bankDetails.branchName || '',
+              isDefault: true
+            }] : [])
         });
 
         // Set logo if exists
@@ -733,45 +758,152 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label>GST Invoice Prefix</Label>
-                  <Input
-                    value={businessData.invoicePrefix}
-                    onChange={(e) => setBusinessData({ ...businessData, invoicePrefix: e.target.value })}
-                    maxLength={10}
-                  />
-                  <p className="text-xs text-slate-500">Prefix for GST Bills (e.g. INV-)</p>
-                </div>
+                <div className="col-span-full border-t pt-6"></div>
+                <div className="col-span-full">
+                  <h3 className="text-lg font-medium mb-4">Invoice Sequences</h3>
 
-                <div className="space-y-2">
-                  <Label>Next GST Invoice Number</Label>
-                  <Input
-                    type="number"
-                    value={businessData.nextInvoiceNumber}
-                    onChange={(e) => setBusinessData({ ...businessData, nextInvoiceNumber: parseInt(e.target.value) })}
-                    min="1"
-                  />
-                </div>
+                  {/* GST Series */}
+                  <div className="space-y-4 mb-6">
+                    <Label className="text-base">GST Invoice Series</Label>
+                    <p className="text-sm text-slate-500 mb-2">Define multiple series for GST invoices (e.g. INV-2024-, RET-2024-)</p>
+                    {/* Primary/Old fields (kept for backward compatibility but hidden or synced if needed, 
+                        or we just treat the first one as default) */}
 
-                <div className="space-y-2">
-                  <Label>Non-GST Invoice Prefix</Label>
-                  <Input
-                    value={businessData.nonGstInvoicePrefix}
-                    onChange={(e) => setBusinessData({ ...businessData, nonGstInvoicePrefix: e.target.value })}
-                    maxLength={10}
-                    placeholder="BILL-"
-                  />
-                  <p className="text-xs text-slate-500">Prefix for Non-GST Bills (e.g. BILL-)</p>
-                </div>
+                    <div className="border rounded-md divide-y">
+                      {(businessData.gstInvoiceSeries?.length ? businessData.gstInvoiceSeries : [{ prefix: businessData.invoicePrefix, nextNumber: businessData.nextInvoiceNumber }]).map((series, idx) => (
+                        <div key={idx} className="p-3 flex gap-3 items-end">
+                          <div className="flex-1 space-y-1">
+                            <Label className="text-xs text-slate-500">Prefix</Label>
+                            <Input
+                              value={series.prefix}
+                              onChange={(e) => {
+                                const newSeries = [...(businessData.gstInvoiceSeries || [])];
+                                if (!newSeries[idx]) newSeries[idx] = { prefix: '', nextNumber: 1 };
+                                newSeries[idx].prefix = e.target.value;
+                                // Sync primary if first index
+                                const updates: any = { gstInvoiceSeries: newSeries };
+                                if (idx === 0) updates.invoicePrefix = e.target.value;
+                                setBusinessData({ ...businessData, ...updates });
+                              }}
+                              placeholder="INV-"
+                            />
+                          </div>
+                          <div className="w-32 space-y-1">
+                            <Label className="text-xs text-slate-500">Next No.</Label>
+                            <Input
+                              type="number"
+                              value={series.nextNumber}
+                              onChange={(e) => {
+                                const newSeries = [...(businessData.gstInvoiceSeries || [])];
+                                if (!newSeries[idx]) newSeries[idx] = { prefix: '', nextNumber: 1 };
+                                newSeries[idx].nextNumber = parseInt(e.target.value) || 1;
+                                // Sync primary if first index
+                                const updates: any = { gstInvoiceSeries: newSeries };
+                                if (idx === 0) updates.nextInvoiceNumber = parseInt(e.target.value) || 1;
+                                setBusinessData({ ...businessData, ...updates });
+                              }}
+                            />
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-red-500 hover:text-red-700 mt-6"
+                            disabled={idx === 0 && (!businessData.gstInvoiceSeries || businessData.gstInvoiceSeries.length <= 1)}
+                            onClick={() => {
+                              const newSeries = businessData.gstInvoiceSeries?.filter((_, i) => i !== idx) || [];
+                              setBusinessData({ ...businessData, gstInvoiceSeries: newSeries });
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const newSeries = [...(businessData.gstInvoiceSeries || []), { prefix: 'INV-NEW-', nextNumber: 1 }];
+                        // If it was empty/undefined before, ensure we capture the first one from existing state
+                        if (!businessData.gstInvoiceSeries || businessData.gstInvoiceSeries.length === 0) {
+                          newSeries.unshift({ prefix: businessData.invoicePrefix, nextNumber: businessData.nextInvoiceNumber });
+                        }
+                        setBusinessData({ ...businessData, gstInvoiceSeries: newSeries });
+                      }}
+                    >
+                      <Plus className="w-4 h-4 mr-2" /> Add GST Series
+                    </Button>
+                  </div>
 
-                <div className="space-y-2">
-                  <Label>Next Non-GST Invoice Number</Label>
-                  <Input
-                    type="number"
-                    value={businessData.nextNonGstInvoiceNumber}
-                    onChange={(e) => setBusinessData({ ...businessData, nextNonGstInvoiceNumber: parseInt(e.target.value) })}
-                    min="1"
-                  />
+                  {/* Non-GST Series */}
+                  <div className="space-y-4">
+                    <Label className="text-base">Non-GST Invoice Series</Label>
+                    <p className="text-sm text-slate-500 mb-2">Define multiple series for Non-GST bills</p>
+
+                    <div className="border rounded-md divide-y">
+                      {(businessData.nonGstInvoiceSeries?.length ? businessData.nonGstInvoiceSeries : [{ prefix: businessData.nonGstInvoicePrefix, nextNumber: businessData.nextNonGstInvoiceNumber }]).map((series, idx) => (
+                        <div key={idx} className="p-3 flex gap-3 items-end">
+                          <div className="flex-1 space-y-1">
+                            <Label className="text-xs text-slate-500">Prefix</Label>
+                            <Input
+                              value={series.prefix}
+                              onChange={(e) => {
+                                const newSeries = [...(businessData.nonGstInvoiceSeries || [])];
+                                if (!newSeries[idx]) newSeries[idx] = { prefix: '', nextNumber: 1 };
+                                newSeries[idx].prefix = e.target.value;
+                                // Sync primary if first index
+                                const updates: any = { nonGstInvoiceSeries: newSeries };
+                                if (idx === 0) updates.nonGstInvoicePrefix = e.target.value;
+                                setBusinessData({ ...businessData, ...updates });
+                              }}
+                              placeholder="BILL-"
+                            />
+                          </div>
+                          <div className="w-32 space-y-1">
+                            <Label className="text-xs text-slate-500">Next No.</Label>
+                            <Input
+                              type="number"
+                              value={series.nextNumber}
+                              onChange={(e) => {
+                                const newSeries = [...(businessData.nonGstInvoiceSeries || [])];
+                                if (!newSeries[idx]) newSeries[idx] = { prefix: '', nextNumber: 1 };
+                                newSeries[idx].nextNumber = parseInt(e.target.value) || 1;
+                                // Sync primary if first index
+                                const updates: any = { nonGstInvoiceSeries: newSeries };
+                                if (idx === 0) updates.nextNonGstInvoiceNumber = parseInt(e.target.value) || 1;
+                                setBusinessData({ ...businessData, ...updates });
+                              }}
+                            />
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-red-500 hover:text-red-700 mt-6"
+                            disabled={idx === 0 && (!businessData.nonGstInvoiceSeries || businessData.nonGstInvoiceSeries.length <= 1)}
+                            onClick={() => {
+                              const newSeries = businessData.nonGstInvoiceSeries?.filter((_, i) => i !== idx) || [];
+                              setBusinessData({ ...businessData, nonGstInvoiceSeries: newSeries });
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const newSeries = [...(businessData.nonGstInvoiceSeries || []), { prefix: 'BILL-NEW-', nextNumber: 1 }];
+                        if (!businessData.nonGstInvoiceSeries || businessData.nonGstInvoiceSeries.length === 0) {
+                          newSeries.unshift({ prefix: businessData.nonGstInvoicePrefix, nextNumber: businessData.nextNonGstInvoiceNumber });
+                        }
+                        setBusinessData({ ...businessData, nonGstInvoiceSeries: newSeries });
+                      }}
+                    >
+                      <Plus className="w-4 h-4 mr-2" /> Add Non-GST Series
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -786,68 +918,137 @@ export default function SettingsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Bank Account Details</CardTitle>
-              <CardDescription>For payment receipts and NEFT transfers</CardDescription>
+              <CardTitle>Bank Accounts</CardTitle>
+              <CardDescription>Manage multiple bank accounts for invoice payments.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label>Bank Name</Label>
-                  <Input
-                    value={businessData.bankDetails.bankName}
-                    onChange={(e) => setBusinessData({
-                      ...businessData,
-                      bankDetails: { ...businessData.bankDetails, bankName: e.target.value }
-                    })}
-                    placeholder="HDFC Bank"
-                  />
+              {businessData.bankAccounts?.map((account, idx) => (
+                <div key={idx} className="border rounded-lg p-4 space-y-4 relative bg-slate-50/50">
+                  <div className="absolute top-4 right-4 flex gap-2">
+                    {account.isDefault && (
+                      <div className="flex items-center text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100">
+                        Default
+                      </div>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-red-500 hover:text-red-700 h-8 w-8"
+                      onClick={() => {
+                        const newAccounts = businessData.bankAccounts.filter((_, i) => i !== idx);
+                        setBusinessData({ ...businessData, bankAccounts: newAccounts });
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Bank Name</Label>
+                      <Input
+                        value={account.bankName}
+                        onChange={(e) => {
+                          const newAccounts = [...businessData.bankAccounts];
+                          newAccounts[idx] = { ...newAccounts[idx], bankName: e.target.value };
+                          setBusinessData({ ...businessData, bankAccounts: newAccounts });
+                        }}
+                        placeholder="HDFC Bank"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Account Holder Name</Label>
+                      <Input
+                        value={account.accountName}
+                        onChange={(e) => {
+                          const newAccounts = [...businessData.bankAccounts];
+                          newAccounts[idx] = { ...newAccounts[idx], accountName: e.target.value };
+                          setBusinessData({ ...businessData, bankAccounts: newAccounts });
+                        }}
+                        placeholder="Business Name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Account Number</Label>
+                      <Input
+                        value={account.accountNumber}
+                        onChange={(e) => {
+                          const newAccounts = [...businessData.bankAccounts];
+                          newAccounts[idx] = { ...newAccounts[idx], accountNumber: e.target.value };
+                          setBusinessData({ ...businessData, bankAccounts: newAccounts });
+                        }}
+                        placeholder="1234567890"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>IFSC Code</Label>
+                      <Input
+                        value={account.ifscCode}
+                        onChange={(e) => {
+                          const newAccounts = [...businessData.bankAccounts];
+                          newAccounts[idx] = { ...newAccounts[idx], ifscCode: e.target.value.toUpperCase() };
+                          setBusinessData({ ...businessData, bankAccounts: newAccounts });
+                        }}
+                        placeholder="HDFC0001234"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Branch Name</Label>
+                      <Input
+                        value={account.branchName}
+                        onChange={(e) => {
+                          const newAccounts = [...businessData.bankAccounts];
+                          newAccounts[idx] = { ...newAccounts[idx], branchName: e.target.value };
+                          setBusinessData({ ...businessData, bankAccounts: newAccounts });
+                        }}
+                        placeholder="Main Branch"
+                      />
+                    </div>
+
+                    <div className="flex items-center space-x-2 pt-8">
+                      <Checkbox
+                        id={`default-bank-${idx}`}
+                        checked={account.isDefault}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            const newAccounts = businessData.bankAccounts.map((acc, i) => ({
+                              ...acc,
+                              isDefault: i === idx
+                            }));
+                            setBusinessData({ ...businessData, bankAccounts: newAccounts });
+                          }
+                        }}
+                      />
+                      <Label htmlFor={`default-bank-${idx}`} className="cursor-pointer font-normal text-slate-600 select-none">
+                        Set as Default for Invoices
+                      </Label>
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Account Holder Name</Label>
-                  <Input
-                    value={businessData.bankDetails.accountName}
-                    onChange={(e) => setBusinessData({
-                      ...businessData,
-                      bankDetails: { ...businessData.bankDetails, accountName: e.target.value }
-                    })}
-                    placeholder="ABC Corporation"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Account Number</Label>
-                  <Input
-                    value={businessData.bankDetails.accountNumber}
-                    onChange={(e) => setBusinessData({
-                      ...businessData,
-                      bankDetails: { ...businessData.bankDetails, accountNumber: e.target.value }
-                    })}
-                    placeholder="1234567890"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>IFSC Code</Label>
-                  <Input
-                    value={businessData.bankDetails.ifscCode}
-                    onChange={(e) => setBusinessData({
-                      ...businessData,
-                      bankDetails: { ...businessData.bankDetails, ifscCode: e.target.value.toUpperCase() }
-                    })}
-                    placeholder="HDFC0001234"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Branch Name</Label>
-                  <Input
-                    value={businessData.bankDetails.branchName}
-                    onChange={(e) => setBusinessData({
-                      ...businessData,
-                      bankDetails: { ...businessData.bankDetails, branchName: e.target.value }
-                    })}
-                    placeholder="Main Branch"
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end">
+              ))}
+
+              <Button
+                variant="outline"
+                className="w-full border-dashed"
+                onClick={() => {
+                  const newAccounts = [
+                    ...(businessData.bankAccounts || []),
+                    {
+                      bankName: '',
+                      accountName: '',
+                      accountNumber: '',
+                      ifscCode: '',
+                      branchName: '',
+                      isDefault: (businessData.bankAccounts?.length === 0)
+                    }
+                  ];
+                  setBusinessData({ ...businessData, bankAccounts: newAccounts });
+                }}
+              >
+                <Plus className="w-4 h-4 mr-2" /> Add Another Bank Account
+              </Button>
+
+              <div className="flex justify-end pt-4 border-t">
                 <Button onClick={handleSaveBusiness} disabled={isSaving}>
                   {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   Save Bank Details

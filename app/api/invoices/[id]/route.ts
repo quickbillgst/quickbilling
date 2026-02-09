@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectDB, Invoice, Customer } from '@/lib/models';
+import { connectDB, Invoice, Customer, Tenant } from '@/lib/models';
 import { verifyAuth } from '@/lib/auth-utils';
+import { calculateInvoiceTax, calculateLineItemTax } from '@/lib/services/gst-service';
 
 // GET - Fetch single invoice
 export async function GET(
@@ -93,49 +94,78 @@ export async function PUT(
             dueDate,
             lineItems,
             notes,
+            terms,
+            bankAccountId,
+            enableRoundOff,
             status,
             signatureIndex,
         } = body;
 
         // Recalculate totals if line items changed
-        let subtotalAmount = 0;
-        let taxableAmount = 0;
-        let cgstAmount = 0;
-        let sgstAmount = 0;
-        let igstAmount = 0;
-        let totalTaxAmount = 0;
-        let discountAmount = 0;
-
-        // Get customer for state comparison
+        const tenant = await Tenant.findById(auth.tenantId);
         const customer = await Customer.findById(customerId || existingInvoice.customerId);
-        const isIntrastate = customer?.billingAddress?.state === auth.tenantId; // Simplified - in real app compare tenant state
 
-        if (lineItems && Array.isArray(lineItems)) {
-            for (const item of lineItems) {
-                const lineAmount = (item.quantity || 0) * (item.unitPrice || 0);
-                const discount = item.discount || 0;
-                const taxable = lineAmount - discount;
-                const taxRate = item.taxRate || 0;
-                const lineTax = taxable * (taxRate / 100);
+        const supplierState = tenant?.address?.state || 'MH';
+        const buyerState = customer?.billingAddress?.state || supplierState;
+        const isIntrastate = supplierState === buyerState;
 
-                subtotalAmount += lineAmount;
-                discountAmount += discount;
-                taxableAmount += taxable;
-                totalTaxAmount += lineTax;
+        const taxContext = {
+            state: buyerState,
+            isIntrastate,
+            isIntegrated: isIntrastate,
+        };
 
-                // For simplicity, assume all IGST or split CGST/SGST
-                if (taxRate > 0) {
-                    // Default to IGST calculation
-                    igstAmount += lineTax;
-                }
+        const processedLineItems = (lineItems || []).map((item: any) => {
+            const calc = calculateLineItemTax(
+                {
+                    quantity: item.quantity,
+                    unitPrice: item.unitPrice,
+                    hsn: item.hsnCode,
+                    taxRate: item.taxRate,
+                    discountValue: item.discountValue,
+                    discountType: item.discountType,
+                },
+                taxContext
+            );
 
-                // Update line item with calculated values
-                item.lineAmount = lineAmount;
-                item.lineTax = lineTax;
-            }
+            return {
+                ...item,
+                lineAmount: calc.lineAmount,
+                lineTax: calc.taxAmount,
+                discount: calc.discountAmount, // This is the calculated absolute discount
+            };
+        });
+
+        const taxSummary = calculateInvoiceTax(
+            processedLineItems.map(item => ({
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                taxRate: item.taxRate,
+                discountValue: item.discountValue,
+                discountType: item.discountType,
+            })),
+            taxContext
+        );
+
+        let finalTotalAmount = taxSummary.totalAmount;
+        let roundOff = 0;
+
+        if (enableRoundOff) {
+            finalTotalAmount = Math.round(finalTotalAmount);
+            roundOff = finalTotalAmount - taxSummary.totalAmount;
         }
 
-        const totalAmount = taxableAmount + totalTaxAmount;
+        const {
+            lineAmount: subtotalAmount,
+            discountAmount,
+            taxableAmount,
+            cgstAmount,
+            sgstAmount,
+            igstAmount,
+            taxAmount: totalTaxAmount,
+        } = taxSummary;
+
+        const totalAmount = finalTotalAmount;
 
         // Update invoice
         const updatedInvoice = await Invoice.findByIdAndUpdate(
@@ -144,8 +174,11 @@ export async function PUT(
                 ...(customerId && { customerId }),
                 ...(invoiceDate && { invoiceDate: new Date(invoiceDate) }),
                 ...(dueDate && { dueDate: new Date(dueDate) }),
-                ...(lineItems && { lineItems }),
+                lineItems: processedLineItems,
                 ...(notes !== undefined && { notes }),
+                ...(terms !== undefined && { terms }),
+                ...(bankAccountId !== undefined && { bankAccountId }),
+                ...(enableRoundOff !== undefined && { enableRoundOff }),
                 ...(status && { status }),
                 ...(signatureIndex !== undefined && { signatureIndex }),
                 subtotalAmount,
@@ -156,6 +189,7 @@ export async function PUT(
                 igstAmount,
                 totalTaxAmount,
                 totalAmount,
+                roundOff,
             },
             { new: true }
         ).populate('customerId');
@@ -211,6 +245,17 @@ export async function DELETE(
                 { error: 'Cannot delete a paid invoice' },
                 { status: 400 }
             );
+        }
+
+        // Check if this is the last generated invoice to reset sequence
+        const invoiceNumberParts = invoice.invoiceNumber.split('-');
+        const sequenceNumber = parseInt(invoiceNumberParts[invoiceNumberParts.length - 1]);
+
+        const tenant = await Tenant.findById(auth.tenantId);
+
+        // If this invoice matches the last generated number, we can reset the counter
+        if (tenant && !isNaN(sequenceNumber) && sequenceNumber === (tenant.nextInvoiceNumber - 1)) {
+            await Tenant.findByIdAndUpdate(auth.tenantId, { $inc: { nextInvoiceNumber: -1 } });
         }
 
         await Invoice.findByIdAndDelete(id);
