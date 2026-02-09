@@ -432,6 +432,33 @@ const batchSchema = new mongoose.Schema(
 batchSchema.index({ tenantId: 1, productId: 1, batchNumber: 1 }, { unique: true });
 batchSchema.index({ tenantId: 1, expiryDate: 1 });
 
+// Certificate Schema
+const certificateSchema = new mongoose.Schema(
+  {
+    tenantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Tenant',
+      required: true,
+      index: true,
+    },
+    certificateNumber: { type: String, unique: true, sparse: true }, // Optional: generate a unique ID
+    name: { type: String, required: true },
+    gender: { type: String, required: true },
+    institute: { type: String, required: true },
+    domain: { type: String, required: true },
+    projectName: { type: String },
+    startDate: { type: Date, required: true },
+    duration: { type: String, required: true },
+    internshipPeriod: { type: String, required: true },
+    content: { type: String }, // The generated message
+    generatedAt: { type: Date, default: Date.now },
+  },
+  { timestamps: true }
+);
+
+certificateSchema.index({ tenantId: 1, generatedAt: -1 });
+
+
 // Export models - use mongoose.models to prevent re-compilation
 // Prevent model compilation errors in development
 // Delete models if they exist to force recompilation with new schema
@@ -447,6 +474,7 @@ if (process.env.NODE_ENV === 'development') {
   if (mongoose.models.AuditLog) delete mongoose.models.AuditLog;
   if (mongoose.models.Batch) delete mongoose.models.Batch;
   if (mongoose.models.Payslip) delete mongoose.models.Payslip;
+  if (mongoose.models.Certificate) delete mongoose.models.Certificate;
   if (mongoose.models.AuthSession) delete mongoose.models.AuthSession;
   if (mongoose.models.PasswordReset) delete mongoose.models.PasswordReset;
 }
@@ -472,6 +500,11 @@ export const AuditLog =
   mongoose.models.AuditLog || mongoose.model('AuditLog', auditLogSchema);
 export const Batch =
   mongoose.models.Batch || mongoose.model('Batch', batchSchema);
+export const Certificate =
+  mongoose.models.Certificate || mongoose.model('Certificate', certificateSchema);
+
+
+
 
 // Payslip Schema
 const payslipSchema = new mongoose.Schema(

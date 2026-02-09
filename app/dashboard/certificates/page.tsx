@@ -8,10 +8,21 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { format } from 'date-fns';
+
+
 import { Calendar as CalendarIcon, Loader2, Download, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useAuth } from '@/lib/auth-context';
 
 export default function CertificatePage() {
@@ -25,8 +36,10 @@ export default function CertificatePage() {
         domain: '',
         startDate: undefined as Date | undefined,
         duration: '',
-        internshipPeriod: ''
+        internshipPeriod: '',
+        projectName: ''
     });
+    const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
@@ -41,12 +54,16 @@ export default function CertificatePage() {
         setFormData(prev => ({ ...prev, startDate: date }));
     };
 
-    const generateCertificate = async () => {
-        if (!formData.name || !formData.gender || !formData.institute || !formData.domain || !formData.startDate || !formData.duration || !formData.internshipPeriod) {
-            toast.error('Please fill in all fields');
+    const handleGenerateClick = () => {
+        if (!formData.name || !formData.gender || !formData.institute || !formData.domain || !formData.startDate || !formData.duration || !formData.internshipPeriod || !formData.projectName) {
+            toast.error('Please fill in all fields including Project Name');
             return;
         }
+        setIsConfirmOpen(true);
+    };
 
+    const generateCertificate = async () => {
+        setIsConfirmOpen(false); // Close dialog
         setIsGenerating(true);
 
         try {
@@ -140,7 +157,6 @@ export default function CertificatePage() {
                                 onChange={handleInputChange}
                             />
                         </div>
-
                         <div className="space-y-2">
                             <Label htmlFor="domain">Internship Domain</Label>
                             <Input
@@ -148,6 +164,17 @@ export default function CertificatePage() {
                                 name="domain"
                                 placeholder="e.g. Web Development"
                                 value={formData.domain}
+                                onChange={handleInputChange}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="projectName">Project Name</Label>
+                            <Input
+                                id="projectName"
+                                name="projectName"
+                                placeholder="e.g. AI Chatbot Development"
+                                value={formData.projectName}
                                 onChange={handleInputChange}
                             />
                         </div>
@@ -164,7 +191,7 @@ export default function CertificatePage() {
                                         )}
                                     >
                                         <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {formData.startDate ? format(formData.startDate, "PPP") : <span>Pick a date</span>}
+                                        {formData.startDate ? formData.startDate.toLocaleDateString() : <span>Pick a date</span>}
                                     </Button>
                                 </PopoverTrigger>
                                 <PopoverContent className="w-auto p-0">
@@ -204,7 +231,7 @@ export default function CertificatePage() {
 
                     <div className="flex justify-end pt-4">
                         <Button
-                            onClick={generateCertificate}
+                            onClick={handleGenerateClick}
                             disabled={isGenerating}
                             className="gap-2"
                             size="lg"
@@ -220,6 +247,21 @@ export default function CertificatePage() {
                 </CardContent>
             </Card>
 
+            <AlertDialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            We are using this information to generate a certificate using AI. Please confirm the details are correct.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={generateCertificate}>Confirm & Generate</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-blue-800 text-sm">
                 <h4 className="font-semibold mb-1 flex items-center gap-2">
                     <Download className="w-4 h-4" />
@@ -229,6 +271,6 @@ export default function CertificatePage() {
                     The certificate will be generated in a new tab. You can save it as PDF using the browser's print function (Ctrl+P / Cmd+P) and selecting "Save as PDF".
                 </p>
             </div>
-        </div>
+        </div >
     );
 }

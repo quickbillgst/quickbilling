@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectDB, Tenant } from '@/lib/models';
+import { connectDB, Tenant, Certificate } from '@/lib/models';
 import { verifyAuth } from '@/lib/auth-utils';
 
 export async function POST(req: NextRequest) {
@@ -9,9 +9,9 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const { name, gender, institute, domain, startDate, duration, internshipPeriod } = await req.json();
+        const { name, gender, institute, domain, startDate, duration, internshipPeriod, projectName } = await req.json();
 
-        if (!name || !gender || !institute || !domain || !startDate || !duration || !internshipPeriod) {
+        if (!name || !gender || !institute || !domain || !startDate || !duration || !internshipPeriod || !projectName) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
         }
 
@@ -22,6 +22,82 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Tenant not found' }, { status: 404 });
         }
 
+        // Generate Content using AI
+        let aiContent = '';
+        const companyName = (tenant as any).businessName || 'Company Name';
+
+
+        try {
+            const apiKey = process.env.GEMINI_API_KEY;
+            if (apiKey) {
+                const prompt = `Write a professional internship certificate body text for ${name}, who worked as a ${domain} Intern at ${companyName}. 
+                Duration: ${duration}.
+                Period: ${internshipPeriod}.
+                Project: "${projectName}".
+                Pronouns: ${gender.toLowerCase() === 'female' ? 'She/Her' : 'He/Him'}.
+                
+                The message should be 2 paragraphs long. 
+                Paragraph 1: Certify that they completed the internship, mentioning the period and the specific project they worked on.
+                Paragraph 2: Mention their skills, dedication, project contribution, and wish them luck. 
+                Do not include "To Whom It May Concern" or Date/Signature lines, just the body text. 
+                Keep it formal and appreciative.`;
+
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }]
+                    })
+                });
+
+                const data = await response.json();
+                if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+                    aiContent = data.candidates[0].content.parts[0].text;
+                }
+            } else {
+                console.warn('GEMINI_API_KEY not found, using template.');
+            }
+        } catch (error) {
+            console.error('AI Generation failed:', error);
+            // Fallback to template will happen automatically if aiContent is empty
+        }
+
+        // Fallback Template if AI fails
+        if (!aiContent) {
+            const isFemale = gender.toLowerCase() === 'female';
+            const pronouns = {
+                heShe: isFemale ? 'she' : 'he',
+                hisHer: isFemale ? 'her' : 'his',
+                himHer: isFemale ? 'her' : 'him',
+                HeShe: isFemale ? 'She' : 'He',
+                HisHer: isFemale ? 'Her' : 'His',
+            };
+
+            aiContent = `This is to certify that <span class="highlight">${name}</span> served as an <span class="highlight">${domain} Intern</span> at <span class="highlight">${companyName}</span>. ${pronouns.HisHer} internship period lasted from <span class="highlight">${internshipPeriod}</span>, during which ${pronouns.heShe} worked on the project entitled "<span class="highlight">${projectName}</span>".
+
+During ${pronouns.hisHer} tenure, ${pronouns.heShe} demonstrated strong organizational skills, problem-solving abilities, and a proactive attitude towards learning new technologies and processes. ${pronouns.HisHer} performance was consistently impressive, and ${pronouns.heShe} made valuable contributions to the project. We wish ${pronouns.himHer} great success in all ${pronouns.hisHer} future endeavours.`;
+        } else {
+            // Process AI content to add minimal highlighting if needed, or just wrap in p tags if raw text
+            // Gemini usually returns markdown or plain text. Let's wrap paragraphs.
+            aiContent = aiContent.split('\n\n').map(p => `<p>${p}</p>`).join('');
+            // Simple replace to highlight key terms if they exist in the AI text exact match? Too risky.
+            // We'll trust the AI text layout.
+        }
+
+        // Save to Database
+        await Certificate.create({
+            tenantId: auth.tenantId,
+            name,
+            gender,
+            institute,
+            domain,
+            projectName,
+            startDate: new Date(startDate),
+            duration,
+            internshipPeriod,
+            content: aiContent
+        });
+
         const html = generateCertificateHTML({
             name,
             gender,
@@ -29,7 +105,9 @@ export async function POST(req: NextRequest) {
             domain,
             startDate,
             duration,
-            internshipPeriod
+            internshipPeriod,
+            projectName,
+            content: aiContent
         }, tenant);
 
         return new NextResponse(html, {
@@ -48,15 +126,6 @@ export async function POST(req: NextRequest) {
 }
 
 function generateCertificateHTML(data: any, tenant: any): string {
-    const isFemale = data.gender.toLowerCase() === 'female';
-    const pronouns = {
-        heShe: isFemale ? 'she' : 'he',
-        hisHer: isFemale ? 'her' : 'his',
-        himHer: isFemale ? 'her' : 'him',
-        HeShe: isFemale ? 'She' : 'He',
-        HisHer: isFemale ? 'Her' : 'His',
-    };
-
     const companyName = tenant.businessName || 'Company Name';
     const companyEmail = tenant.email || 'contact@company.com';
 
@@ -321,14 +390,8 @@ function generateCertificateHTML(data: any, tenant: any): string {
         <div class="title">To Whom It May Concern</div>
 
         <div class="content">
-            <p>
-                This is to certify that <span class="highlight">${data.name}</span> served as an <span class="highlight">${data.domain} Intern</span> at <span class="highlight">${companyName}</span>. ${pronouns.HisHer} internship period lasted from <span class="highlight">${data.internshipPeriod}</span>.
-            </p>
-
-            <p>
-                During ${pronouns.hisHer} tenure, ${pronouns.heShe} demonstrated strong organizational skills, problem-solving abilities, and a proactive attitude towards learning new technologies and processes. ${pronouns.HisHer} performance was consistently impressive, and ${pronouns.heShe} made valuable contributions while working alongside the team.
-            </p>
-
+            ${data.content}
+            
             <div class="internship-details">
                 <h3>Internship Details (Academic Internship)</h3>
                 <ul class="details-list">
@@ -336,11 +399,12 @@ function generateCertificateHTML(data: any, tenant: any): string {
                     <li><strong>Duration:</strong> ${data.duration}</li>
                     <li><strong>Domain:</strong> ${data.domain}</li>
                     <li><strong>Institute:</strong> ${data.institute}</li>
+                    <li><strong>Project:</strong> ${data.projectName}</li>
                 </ul>
             </div>
 
             <p>
-                We wish ${pronouns.himHer} great success in all ${pronouns.hisHer} future endeavours. Please feel free to contact us at <span class="highlight">${companyEmail}</span> for any further information.
+               Please feel free to contact us at <span class="highlight">${companyEmail}</span> for any further information.
             </p>
         </div>
 
@@ -373,3 +437,4 @@ function generateCertificateHTML(data: any, tenant: any): string {
 </html>
   `;
 }
+

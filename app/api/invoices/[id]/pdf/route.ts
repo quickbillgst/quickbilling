@@ -126,17 +126,18 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     
     .invoice-title {
       color: #2563eb;
-      font-size: 14px;
-      font-weight: 400;
+      font-size: 15px;
+      font-weight: bold;
       letter-spacing: 3px;
       text-transform: uppercase;
     }
     
     .original-copy {
-      color: #2563eb;
+      color: #000000ff;
       font-size: 10px;
       text-transform: uppercase;
       letter-spacing: 1px;
+      font-weight: bold;
     }
     
     /* Company Header */
@@ -159,20 +160,20 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     }
     
     .company-details {
-      font-size: 11px;
+      font-size: 13px;
       line-height: 1.5;
       color: #4b5563;
     }
     
     .company-details .label {
-      color: #2563eb;
-      font-weight: 500;
+      color: #040404ff;
+      font-weight: bold;
     }
     
     .logo-box {
-      width: 80px;
-      height: 80px;
-      border: 1px solid #d1d5db;
+      width: 100px;
+      height: 100px;
+      // border: 1px solid #d1d5db;
       border-radius: 50%;
       display: flex;
       align-items: center;
@@ -190,13 +191,13 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     /* Invoice Meta Row */
     .invoice-meta {
       display: flex;
-      gap: 40px;
+      gap: 80px;
       margin-bottom: 15px;
-      font-size: 11px;
+      font-size: 13px;
     }
     
     .meta-item .meta-label {
-      color: #6b7280;
+      color: #020202ff;
     }
     
     .meta-item .meta-value {
@@ -209,7 +210,7 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
       display: flex;
       gap: 40px;
       margin-bottom: 15px;
-      font-size: 11px;
+      font-size: 13px;
     }
     
     .customer-col { flex: 1; }
@@ -237,10 +238,10 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     /* Place of Supply */
     .place-supply {
       margin-bottom: 15px;
-      font-size: 11px;
+      font-size: 12px;
     }
     
-    .place-supply .label { color: #6b7280; }
+    .place-supply .label { color: #0c0c0eff; }
     .place-supply .value { font-weight: bold; color: #1f2937; }
     
     /* Items Table */
@@ -252,8 +253,8 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     }
     
     .items-table thead {
-      border-top: 1px solid #2563eb;
-      border-bottom: 1px solid #2563eb;
+      border-top: 2px solid #2563eb;
+      border-bottom: 2px solid #2563eb;
     }
     
     .items-table th {
@@ -283,7 +284,7 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     
     .item-sac {
       font-size: 10px;
-      color: #6b7280;
+      color: #1745a1ff;
     }
     
     /* Summary Row */
@@ -304,17 +305,17 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
       font-size: 11px;
     }
     
-    .total-line .label { color: #4b5563; }
+    .total-line .label { color: #050607ff; }
     .total-line .value { color: #1f2937; text-align: right; }
     
     .total-line.grand {
       font-size: 16px;
       font-weight: bold;
       padding-top: 8px;
-      border-top: 1px solid #e5e7eb;
-    }
+      border-top: 1px solid #090909ff;
+    }s
     
-    .total-line.grand .label { color: #1f2937; }
+    .total-line.grand .label { color: #0252c1ff; }
     .total-line.grand .value { color: #1f2937; }
     
     /* Items Count & Amount Words */
@@ -322,7 +323,7 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
       display: flex;
       justify-content: space-between;
       font-size: 10px;
-      color: #2563eb;
+      color: #090a0bff;
       margin-bottom: 5px;
       padding-top: 5px;
       border-top: 1px solid #e5e7eb;
@@ -330,20 +331,26 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     
     .amount-words {
       font-size: 10px;
-      color: #4b5563;
+      color: #07080aff;
       margin-bottom: 10px;
     }
     
-    /* Amount Payable */
     .amount-payable-row {
       display: flex;
-      justify-content: space-between;
-      font-size: 12px;
+      justify-content: flex-end;   /* push content to right side */
+      align-items: center;
+      font-size: 13px;
       font-weight: bold;
-      padding: 8px 0;
-      border-top: 1px solid #1f2937;
-      border-bottom: 1px solid #1f2937;
-      margin-bottom: 20px;
+      margin-top: 10px;
+    }
+
+    .amount-payable-row .label {
+      margin-right: 6px;
+    }
+
+    .amount-payable-row .value {
+      font-size: 14px;
+      font-weight: 700;
     }
     
     /* Footer Section */
@@ -391,7 +398,7 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     
     .bank-table .bank-value {
       color: #1f2937;
-      font-weight: 500;
+      font-weight: bold;
     }
     
     .signature-col {
@@ -400,7 +407,7 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     
     .for-company {
       font-size: 11px;
-      color: #2563eb;
+      color: #020202ff;
       margin-bottom: 40px;
     }
     
@@ -410,8 +417,8 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     }
     
     .signature-image img {
-      max-height: 50px;
-      max-width: 120px;
+      max-height: 80px;
+      max-width: 170px;
     }
     
     .signatory-name {
@@ -423,7 +430,7 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     
     .authorized-text {
       font-size: 10px;
-      color: #6b7280;
+      color: #030303ff;
     }
     
     /* Print */
@@ -506,7 +513,7 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
       <div class="customer-col">
         <div class="section-label">Billing Address:</div>
         <div class="address-text">
-          ${customerAddressLine1}${customerAddressLine2 ? ', ' + customerAddressLine2 : ''}<br>
+          ${customerAddressLine1} <br> ${customerAddressLine2} <br>
           ${customerCity}${customerState ? ', ' + customerState : ''}${customerPincode ? ', ' + customerPincode : ''}
         </div>
       </div>
@@ -514,7 +521,7 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
     
     <!-- Place of Supply -->
     <div class="place-supply">
-      <span class="label">Place of Supply:</span>
+      <span class="label">Place of Supply:</span><br>
       <span class="value">${stateCode}</span>
     </div>
     
@@ -535,7 +542,7 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
         ${(invoice.lineItems || []).map((item: any, index: number) => {
       const taxableValue = (item.unitPrice * item.quantity) - (item.discount || 0);
       const taxAmount = item.lineTax || 0;
-      const lineTotal = item.lineAmount || taxableValue + taxAmount;
+      const lineTotal = taxableValue + taxAmount;
       return `
           <tr>
             <td class="center">${index + 1}</td>
@@ -634,7 +641,6 @@ function generateInvoiceHTML(invoice: any, customer: any, tenant: any): string {
               <div class="signature-image">
                 <img src="${signature.image}" alt="Signature" />
               </div>
-              <div class="signatory-name">${signature.name || ''}</div>
             `;
       }
       return `<div style="height:50px;"></div>`;
