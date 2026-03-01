@@ -14,7 +14,9 @@ import {
   Home,
   Receipt,
   GraduationCap,
-  Upload
+  Upload,
+  FileCheck,
+  Award,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
@@ -23,6 +25,8 @@ const navItems = [
   { label: 'Dashboard', icon: Home, href: '/dashboard' },
   { label: 'Invoices', icon: FileText, href: '/dashboard/invoices' },
   { label: 'Payslips', icon: Receipt, href: '/dashboard/payslips' },
+  { label: 'Relieving Letters', icon: FileCheck, href: '/dashboard/relieving-letters' },
+  { label: 'Experience Letters', icon: Award, href: '/dashboard/experience-letters' },
   { label: 'Certificates', icon: GraduationCap, href: '/dashboard/certificates' },
   { label: 'Products', icon: Package, href: '/dashboard/products' },
   { label: 'Customers', icon: Users, href: '/dashboard/customers' },

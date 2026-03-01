@@ -702,5 +702,92 @@ passwordResetSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 86400 });
 export const PasswordReset =
   mongoose.models.PasswordReset || mongoose.model('PasswordReset', passwordResetSchema);
 
+// Relieving Letter Schema
+const relievingLetterSchema = new mongoose.Schema(
+  {
+    tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
+    letterNumber: { type: String, required: true, index: true },
+
+    // Employee Details
+    employeeName: { type: String, required: true },
+    employeeId: { type: String },
+    designation: { type: String },
+    department: { type: String },
+
+    // Dates
+    dateOfJoining: { type: Date, required: true },
+    lastWorkingDate: { type: Date, required: true },
+    relievingDate: { type: Date, required: true }, // Letter issue date
+
+    // Signatory
+    signatoryName: { type: String },
+    signatoryDesignation: { type: String },
+
+    // Extra
+    remarks: { type: String },
+    status: {
+      type: String,
+      enum: ['draft', 'generated', 'sent'],
+      default: 'draft',
+      index: true,
+    },
+    createdByUserId: mongoose.Schema.Types.ObjectId,
+  },
+  { timestamps: true }
+);
+
+relievingLetterSchema.index({ tenantId: 1, letterNumber: 1 }, { unique: true });
+relievingLetterSchema.index({ tenantId: 1, employeeName: 1 });
+
+export const RelievingLetter =
+  mongoose.models.RelievingLetter || mongoose.model('RelievingLetter', relievingLetterSchema);
+
+// Experience Letter Schema
+const experienceLetterSchema = new mongoose.Schema(
+  {
+    tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
+    letterNumber: { type: String, required: true, index: true },
+
+    // Employee Details
+    employeeName: { type: String, required: true },
+    employeeId: { type: String },
+    designation: { type: String },
+    department: { type: String },
+
+    // Dates
+    dateOfJoining: { type: Date, required: true },
+    lastWorkingDate: { type: Date, required: true },
+    letterDate: { type: Date, required: true }, // Letter issue date
+
+    // Content
+    jobDescription: { type: String },
+    conductRating: {
+      type: String,
+      enum: ['Excellent', 'Good', 'Satisfactory'],
+      default: 'Good',
+    },
+
+    // Signatory
+    signatoryName: { type: String },
+    signatoryDesignation: { type: String },
+
+    // Meta
+    status: {
+      type: String,
+      enum: ['draft', 'generated', 'sent'],
+      default: 'draft',
+      index: true,
+    },
+    createdByUserId: mongoose.Schema.Types.ObjectId,
+  },
+  { timestamps: true }
+);
+
+experienceLetterSchema.index({ tenantId: 1, letterNumber: 1 }, { unique: true });
+experienceLetterSchema.index({ tenantId: 1, employeeName: 1 });
+
+export const ExperienceLetter =
+  mongoose.models.ExperienceLetter || mongoose.model('ExperienceLetter', experienceLetterSchema);
+
 // Alias for backwards compatibility
 export const connect = connectDB;
