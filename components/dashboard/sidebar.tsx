@@ -17,12 +17,14 @@ import {
   Upload,
   FileCheck,
   Award,
+  UserRoundCog,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 
 const navItems = [
   { label: 'Dashboard', icon: Home, href: '/dashboard' },
+  { label: 'Employees', icon: UserRoundCog, href: '/dashboard/employees' },
   { label: 'Invoices', icon: FileText, href: '/dashboard/invoices' },
   { label: 'Payslips', icon: Receipt, href: '/dashboard/payslips' },
   { label: 'Relieving Letters', icon: FileCheck, href: '/dashboard/relieving-letters' },

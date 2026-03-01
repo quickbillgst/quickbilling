@@ -789,5 +789,69 @@ experienceLetterSchema.index({ tenantId: 1, employeeName: 1 });
 export const ExperienceLetter =
   mongoose.models.ExperienceLetter || mongoose.model('ExperienceLetter', experienceLetterSchema);
 
+// Employee Schema - Central employee directory
+const employeeSchema = new mongoose.Schema(
+  {
+    tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
+
+    // Basic Information
+    employeeName: { type: String, required: true },
+    employeeId: { type: String },
+    designation: { type: String },
+    department: { type: String },
+    gender: { type: String, enum: ['M', 'F', 'Other'] },
+    dateOfBirth: { type: Date },
+    dateOfJoining: { type: Date },
+    lastWorkingDate: { type: Date },
+    location: { type: String },
+    costCenter: { type: String },
+
+    // Contact
+    email: { type: String },
+    phone: { type: String },
+
+    // Statutory Details
+    panNumber: { type: String },
+    uan: { type: String },
+    pfNumber: { type: String },
+    esiNumber: { type: String },
+    epsNumber: { type: String },
+
+    // Bank Details
+    bankAccountNumber: { type: String },
+    bankName: { type: String },
+    ifscCode: { type: String },
+    branchName: { type: String },
+
+    // Salary Details
+    basicSalary: { type: Number, default: 0 },
+    hra: { type: Number, default: 0 },
+    conveyanceAllowance: { type: Number, default: 0 },
+    medicalAllowance: { type: Number, default: 0 },
+    specialAllowance: { type: Number, default: 0 },
+    otherEarnings: { type: Number, default: 0 },
+
+    // Certificate-specific fields
+    institute: { type: String },
+
+    // Meta
+    status: {
+      type: String,
+      enum: ['active', 'inactive', 'terminated'],
+      default: 'active',
+      index: true,
+    },
+    notes: { type: String },
+    createdByUserId: mongoose.Schema.Types.ObjectId,
+  },
+  { timestamps: true }
+);
+
+employeeSchema.index({ tenantId: 1, employeeName: 1 });
+employeeSchema.index({ tenantId: 1, employeeId: 1 });
+
+export const Employee =
+  mongoose.models.Employee || mongoose.model('Employee', employeeSchema);
+
 // Alias for backwards compatibility
 export const connect = connectDB;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 
-import { Calendar as CalendarIcon, Loader2, Download, FileText } from 'lucide-react';
+import { Calendar as CalendarIcon, Loader2, Download, FileText, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
@@ -28,6 +28,35 @@ import { useAuth } from '@/lib/auth-context';
 export default function CertificatePage() {
     const { token } = useAuth();
     const [isGenerating, setIsGenerating] = useState(false);
+    const [employees, setEmployees] = useState<any[]>([]);
+    const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+
+    useEffect(() => {
+        const fetchEmployees = async () => {
+            try {
+                const res = await fetch('/api/employees?all=true', {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const data = await res.json();
+                if (res.ok) setEmployees(data.employees || []);
+            } catch (e) { /* ignore */ }
+        };
+        if (token) fetchEmployees();
+    }, [token]);
+
+    const handleEmployeeSelect = (empId: string) => {
+        setSelectedEmployeeId(empId);
+        const emp = employees.find((e: any) => e._id === empId);
+        if (!emp) return;
+        const genderMap: Record<string, string> = { M: 'Male', F: 'Female', Other: 'Other' };
+        setFormData(prev => ({
+            ...prev,
+            name: emp.employeeName || '',
+            gender: genderMap[emp.gender] || emp.gender || '',
+            institute: emp.institute || '',
+        }));
+        toast.success(`Loaded details for ${emp.employeeName}`);
+    };
 
     const [formData, setFormData] = useState({
         name: '',
@@ -111,6 +140,32 @@ export default function CertificatePage() {
                     Generate internship completion certificates for interns
                 </p>
             </div>
+
+            {/* Employee Picker */}
+            {employees.length > 0 && (
+                <Card className="border-blue-200 bg-blue-50/50">
+                    <CardContent className="pt-4 pb-4">
+                        <div className="flex items-center gap-3">
+                            <UserCheck className="h-5 w-5 text-blue-600" />
+                            <div className="flex-1">
+                                <Label className="text-sm font-medium text-blue-800">Quick Fill from Employee</Label>
+                                <Select value={selectedEmployeeId} onValueChange={handleEmployeeSelect}>
+                                    <SelectTrigger className="mt-1 bg-white">
+                                        <SelectValue placeholder="Select an employee to auto-fill details..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {employees.map((emp: any) => (
+                                            <SelectItem key={emp._id} value={emp._id}>
+                                                {emp.employeeName} {emp.employeeId ? `(${emp.employeeId})` : ''}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
 
             <Card>
                 <CardHeader>

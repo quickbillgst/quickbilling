@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,6 +8,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import {
     ArrowLeft,
     User,
@@ -17,6 +24,7 @@ import {
     Save,
     Loader2,
     PenTool,
+    UserCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
@@ -25,6 +33,37 @@ export default function NewRelievingLetterPage() {
     const router = useRouter();
     const { token } = useAuth();
     const [isLoading, setIsLoading] = useState(false);
+    const [employees, setEmployees] = useState<any[]>([]);
+    const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+
+    useEffect(() => {
+        const fetchEmployees = async () => {
+            try {
+                const res = await fetch('/api/employees?all=true', {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const data = await res.json();
+                if (res.ok) setEmployees(data.employees || []);
+            } catch (e) { /* ignore */ }
+        };
+        if (token) fetchEmployees();
+    }, [token]);
+
+    const handleEmployeeSelect = (empId: string) => {
+        setSelectedEmployeeId(empId);
+        const emp = employees.find((e: any) => e._id === empId);
+        if (!emp) return;
+        setFormData(prev => ({
+            ...prev,
+            employeeName: emp.employeeName || '',
+            employeeId: emp.employeeId || '',
+            designation: emp.designation || '',
+            department: emp.department || '',
+            dateOfJoining: emp.dateOfJoining ? emp.dateOfJoining.slice(0, 10) : '',
+            lastWorkingDate: emp.lastWorkingDate ? emp.lastWorkingDate.slice(0, 10) : '',
+        }));
+        toast.success(`Loaded details for ${emp.employeeName}`);
+    };
 
     const [formData, setFormData] = useState({
         employeeName: '',
@@ -99,6 +138,32 @@ export default function NewRelievingLetterPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Employee Picker */}
+                {employees.length > 0 && (
+                    <Card className="border-blue-200 bg-blue-50/50">
+                        <CardContent className="pt-4 pb-4">
+                            <div className="flex items-center gap-3">
+                                <UserCheck className="h-5 w-5 text-blue-600" />
+                                <div className="flex-1">
+                                    <Label className="text-sm font-medium text-blue-800">Quick Fill from Employee</Label>
+                                    <Select value={selectedEmployeeId} onValueChange={handleEmployeeSelect}>
+                                        <SelectTrigger className="mt-1 bg-white">
+                                            <SelectValue placeholder="Select an employee to auto-fill details..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {employees.map((emp: any) => (
+                                                <SelectItem key={emp._id} value={emp._id}>
+                                                    {emp.employeeName} {emp.employeeId ? `(${emp.employeeId})` : ''} {emp.designation ? `— ${emp.designation}` : ''}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+
                 {/* Employee Details */}
                 <Card>
                     <CardHeader>

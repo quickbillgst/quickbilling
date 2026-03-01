@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,6 +25,7 @@ import {
     FileText,
     Save,
     Loader2,
+    UserCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
@@ -42,6 +43,46 @@ export default function NewPayslipPage() {
     const { token } = useAuth();
     const [isLoading, setIsLoading] = useState(false);
     const [showPreview, setShowPreview] = useState(false);
+    const [employees, setEmployees] = useState<any[]>([]);
+    const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+
+    // Fetch employees for auto-fill dropdown
+    useEffect(() => {
+        const fetchEmployees = async () => {
+            try {
+                const res = await fetch('/api/employees?all=true', {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const data = await res.json();
+                if (res.ok) setEmployees(data.employees || []);
+            } catch (e) { /* ignore */ }
+        };
+        if (token) fetchEmployees();
+    }, [token]);
+
+    const handleEmployeeSelect = (empId: string) => {
+        setSelectedEmployeeId(empId);
+        const emp = employees.find((e: any) => e._id === empId);
+        if (!emp) return;
+        setFormData(prev => ({
+            ...prev,
+            employeeName: emp.employeeName || '',
+            employeeId: emp.employeeId || '',
+            designation: emp.designation || '',
+            department: emp.department || '',
+            bankAccountNumber: emp.bankAccountNumber || '',
+            bankName: emp.bankName || '',
+            ifscCode: emp.ifscCode || '',
+            panNumber: emp.panNumber || '',
+            basicSalary: emp.basicSalary?.toString() || '',
+            hra: emp.hra?.toString() || '',
+            conveyanceAllowance: emp.conveyanceAllowance?.toString() || '',
+            medicalAllowance: emp.medicalAllowance?.toString() || '',
+            specialAllowance: emp.specialAllowance?.toString() || '',
+            otherEarnings: emp.otherEarnings?.toString() || '',
+        }));
+        toast.success(`Loaded details for ${emp.employeeName}`);
+    };
 
     // Form state
     const [formData, setFormData] = useState({
@@ -214,6 +255,32 @@ export default function NewPayslipPage() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Form Section */}
                 <div className="lg:col-span-2 space-y-6">
+                    {/* Employee Picker */}
+                    {employees.length > 0 && (
+                        <Card className="border-blue-200 bg-blue-50/50">
+                            <CardContent className="pt-4 pb-4">
+                                <div className="flex items-center gap-3">
+                                    <UserCheck className="h-5 w-5 text-blue-600" />
+                                    <div className="flex-1">
+                                        <Label className="text-sm font-medium text-blue-800">Quick Fill from Employee</Label>
+                                        <Select value={selectedEmployeeId} onValueChange={handleEmployeeSelect}>
+                                            <SelectTrigger className="mt-1 bg-white">
+                                                <SelectValue placeholder="Select an employee to auto-fill details..." />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {employees.map((emp: any) => (
+                                                    <SelectItem key={emp._id} value={emp._id}>
+                                                        {emp.employeeName} {emp.employeeId ? `(${emp.employeeId})` : ''} {emp.designation ? `— ${emp.designation}` : ''}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
+
                     {/* Employee Details */}
                     <Card>
                         <CardHeader className="pb-4">
