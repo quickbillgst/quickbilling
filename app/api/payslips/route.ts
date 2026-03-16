@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectDB, Payslip, Tenant } from '@/lib/models';
+import { connectDB, Payslip } from '@/lib/models';
 import { verifyAuth } from '@/lib/auth-utils';
 
 // Helper to convert number to words
@@ -29,6 +29,16 @@ function numberToWords(num: number): string {
     result += ' Only';
 
     return result;
+}
+
+function buildPayslipPrefix(year: number, month: number): string {
+    return `PS-${year}${String(month).padStart(2, '0')}-`;
+}
+
+function extractPayslipSequence(payslipNumber: string): number {
+    const parts = payslipNumber.split('-');
+    const sequence = parseInt(parts[parts.length - 1], 10);
+    return Number.isNaN(sequence) ? 0 : sequence;
 }
 
 // GET - List payslips
@@ -153,63 +163,78 @@ export async function POST(request: NextRequest) {
         // Convert net pay to words
         const netPayInWords = numberToWords(netPay);
 
-        // Generate payslip number
-        const tenant = await Tenant.findById(auth.tenantId);
+        // Generate payslip number using latest monthly sequence.
+        // On collisions (concurrent requests), retry with the next available number.
         const currentYear = new Date().getFullYear();
         const currentMonth = new Date().getMonth() + 1;
 
-        // Count existing payslips for this month
-        const existingCount = await Payslip.countDocuments({
-            tenantId: auth.tenantId,
-            createdAt: {
-                $gte: new Date(currentYear, currentMonth - 1, 1),
-                $lt: new Date(currentYear, currentMonth, 1),
-            },
-        });
+        const prefix = buildPayslipPrefix(currentYear, currentMonth);
+        let payslip: any = null;
+        const maxRetries = 5;
 
-        const payslipNumber = `PS-${currentYear}${String(currentMonth).padStart(2, '0')}-${String(existingCount + 1).padStart(4, '0')}`;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            const latestPayslip = await Payslip.findOne({
+                tenantId: auth.tenantId,
+                payslipNumber: { $regex: `^${prefix}` },
+            })
+                .sort({ payslipNumber: -1 })
+                .select({ payslipNumber: 1 })
+                .lean();
 
-        // Create payslip
-        const payslip = new Payslip({
-            tenantId: auth.tenantId,
-            payslipNumber,
-            employeeName,
-            employeeId,
-            designation,
-            department,
-            bankAccountNumber,
-            bankName,
-            ifscCode,
-            panNumber,
-            payPeriod,
-            payDate: new Date(payDate),
-            basicSalary,
-            hra,
-            conveyanceAllowance,
-            medicalAllowance,
-            specialAllowance,
-            otherEarnings,
-            bonus,
-            overtime,
-            providentFund,
-            professionalTax,
-            incomeTax,
-            esi,
-            loanDeduction,
-            otherDeductions,
-            grossEarnings,
-            totalDeductions,
-            netPay,
-            netPayInWords,
-            workingDays,
-            presentDays,
-            lop,
-            notes,
-            status: 'generated',
-            createdByUserId: auth.userId,
-        });
+            const nextSequence = extractPayslipSequence(latestPayslip?.payslipNumber || '') + 1;
+            const payslipNumber = `${prefix}${String(nextSequence).padStart(4, '0')}`;
 
-        await payslip.save();
+            try {
+                payslip = await Payslip.create({
+                    tenantId: auth.tenantId,
+                    payslipNumber,
+                    employeeName,
+                    employeeId,
+                    designation,
+                    department,
+                    bankAccountNumber,
+                    bankName,
+                    ifscCode,
+                    panNumber,
+                    payPeriod,
+                    payDate: new Date(payDate),
+                    basicSalary,
+                    hra,
+                    conveyanceAllowance,
+                    medicalAllowance,
+                    specialAllowance,
+                    otherEarnings,
+                    bonus,
+                    overtime,
+                    providentFund,
+                    professionalTax,
+                    incomeTax,
+                    esi,
+                    loanDeduction,
+                    otherDeductions,
+                    grossEarnings,
+                    totalDeductions,
+                    netPay,
+                    netPayInWords,
+                    workingDays,
+                    presentDays,
+                    lop,
+                    notes,
+                    status: 'generated',
+                    createdByUserId: auth.userId,
+                });
+                break;
+            } catch (createError: any) {
+                const isDuplicate = createError?.code === 11000;
+                if (!isDuplicate || attempt === maxRetries - 1) {
+                    throw createError;
+                }
+            }
+        }
+
+        if (!payslip) {
+            return NextResponse.json({ error: 'Failed to generate unique payslip number' }, { status: 409 });
+        }
 
         return NextResponse.json(
             {
@@ -226,6 +251,12 @@ export async function POST(request: NextRequest) {
         );
     } catch (error) {
         console.error('Payslip creation error:', error);
+        if ((error as any)?.code === 11000) {
+            return NextResponse.json(
+                { error: 'Duplicate payslip number detected. Please retry.' },
+                { status: 409 }
+            );
+        }
         return NextResponse.json({ error: 'Failed to create payslip' }, { status: 500 });
     }
 }
